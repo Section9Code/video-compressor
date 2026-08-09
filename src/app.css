@@ -84,4 +84,16 @@ body {
   );
 }
 
+/* The completed part of the stream: the same block geometry as the track, lit in
+   Toxic Green. drop-shadow follows the gradient's alpha, so each block glows
+   individually rather than the fill glowing as one slab. */
+@utility bar-fill {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-toxic) 0 18px,
+    transparent 18px 22px
+  );
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--color-toxic) 60%, transparent));
+}
+
 [x-cloak] { display: none !important; }

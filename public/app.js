@@ -10,6 +10,7 @@ function app() {
     selected: new Set(),
     jobs: [],
     error: null,
+    pollFailed: false,
     settingsError: null,
     schedule: { enabled: false, open: true, startHour: 2, endHour: 6 },
 
@@ -18,7 +19,13 @@ function app() {
       this.error = null;
       try {
         this.settings = await this.json('/api/settings');
-        this.tree = await this.loadDirs('', 0);
+        // /api/browse only returns *sub*directories, so the root needs a node of its
+        // own or videos sitting directly in MEDIA_ROOT can never be scanned. Named to
+        // match the leading ROOT in the breadcrumb.
+        this.tree = [
+          { path: '', name: 'ROOT', depth: 0, open: true },
+          ...await this.loadDirs('', 1),
+        ];
       } catch (err) {
         this.error = err.message;
       }
@@ -124,10 +131,22 @@ function app() {
       }
     },
 
+    // Called bare from boot() and the interval, so it must never reject. It clears
+    // only an error it raised itself: a recovering server stops nagging, but a scan
+    // or save error the user has not read yet is not wiped two seconds later.
     async poll() {
-      const body = await this.json('/api/jobs');
-      this.jobs = body.jobs;
-      this.schedule = body.schedule;
+      try {
+        const body = await this.json('/api/jobs');
+        this.jobs = body.jobs;
+        this.schedule = body.schedule;
+        if (this.pollFailed) {
+          this.pollFailed = false;
+          this.error = null;
+        }
+      } catch (err) {
+        this.pollFailed = true;
+        this.error = err.message;
+      }
     },
 
     get pending() {
