@@ -89,7 +89,7 @@
           <div class="grid gap-3">
             <template x-for="f in files" :key="f.path">
               <label class="panel flex cursor-pointer items-center gap-4 px-4 py-3"
-                     :class="{ 'glow': selected.has(f.path), 'opacity-40': f.queued || (!f.wouldReduce && !selected.has(f.path)) }">
+                     :class="{ 'glow': selected.has(f.path), 'opacity-40': f.queued || (!reducible(f) && !selected.has(f.path)) }">
                 <input type="checkbox" class="h-4 w-4 accent-[#00f2ff]"
                        :disabled="f.queued"
                        :checked="selected.has(f.path)"
@@ -99,7 +99,7 @@
                 <span class="font-mono text-xs text-on-surface-variant" x-text="f.codec ?? '-'"></span>
                 <span class="w-20 text-right font-mono text-xs" x-text="fmtSize(f.size)"></span>
                 <span x-show="f.queued" class="pill text-toxic">[ QUEUED ]</span>
-                <span x-show="!f.queued && !f.wouldReduce && !f.probeError" class="pill text-outline"
+                <span x-show="!f.queued && !reducible(f) && !f.probeError" class="pill text-outline"
                       x-text="`[ ALREADY ${Math.min(f.width, f.height)}P ]`"></span>
               </label>
             </template>

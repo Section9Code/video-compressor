@@ -74,12 +74,16 @@ function app() {
       }
     },
 
+    // Client-side so changing the target re-ticks (and re-dims) the list without a re-scan.
+    reducible(f) {
+      return Math.min(f.width, f.height) > this.settings.targetShortSide;
+    },
+
     // Recomputed against the current target, so changing the setting re-ticks the list.
     selectAllReducible() {
-      const target = this.settings.targetShortSide;
       this.selected = new Set(
         this.files
-          .filter((f) => !f.queued && !f.probeError && Math.min(f.width, f.height) > target)
+          .filter((f) => !f.queued && !f.probeError && this.reducible(f))
           .map((f) => f.path),
       );
     },
