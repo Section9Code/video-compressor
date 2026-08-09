@@ -3449,33 +3449,24 @@ export function withinSchedule(date, settings) {
 }
 ```
 
-Replace `startWorker` with:
+Add the schedule check to `startWorker`'s loop. **Do not replace the whole
+function** — Task 9's fix wrapped the loop body in a `try/catch` so that a
+rejection cannot kill the fire-and-forget IIFE, and that guard must survive.
+Add the check as the first statement inside the existing guarded body:
 
 ```js
-export function startWorker(db, deps) {
-  const { idleMs = 2000, now = Date.now } = deps;
-  let stopped = false;
-
-  (async () => {
-    while (!stopped) {
       // Read live rather than from the job snapshot: this is policy about when work
       // may start, so a schedule change should take effect immediately.
       if (!withinSchedule(new Date(now()), getSettings(db))) {
         await sleep(idleMs);
         continue;
       }
-      const job = nextWaiting(db);
-      if (!job) {
-        await sleep(idleMs);
-        continue;
-      }
-      await runJob(db, job, deps);
-    }
-  })();
-
-  return () => { stopped = true; };
-}
 ```
+
+`getSettings(db)` runs on every iteration and can throw, so it must sit inside
+the same `try/catch` as `runJob` — an unguarded throw here would kill the
+process on an idle queue, with no job involved at all. `startWorker` also needs
+`now` destructured from `deps` (defaulting to `Date.now`) if it is not already.
 
 - [ ] **Step 5: Report the schedule state from the API**
 
