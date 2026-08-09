@@ -2286,7 +2286,7 @@ Create `src/app.css`:
    It is exposed here as `accent` so the intent is unambiguous at call sites. */
 @theme {
   --color-surface: #131315;
-  --color-surface-dim: #0e0e10;
+  --color-surface-dim: #131315;
   --color-surface-container-lowest: #0e0e10;
   --color-surface-container-low: #1c1b1d;
   --color-surface-container: #201f21;
@@ -2315,7 +2315,6 @@ Create `src/app.css`:
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
-  --radius-none: 0px;
 }
 
 /* Sharp corners everywhere: the design system sets roundedness to 0px. */
