@@ -1,0 +1,19 @@
+{
+  "name": "video-compressor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "css": "tailwindcss -i src/app.css -o public/app.css --minify",
+    "build": "npm run css && cp node_modules/alpinejs/dist/cdn.min.js public/alpine.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "alpinejs": "^3.14.0"
+  }
+}
