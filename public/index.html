@@ -37,6 +37,8 @@
       </button>
       <p class="mt-4 font-mono text-xs text-outline" x-text="`ENCODER: ${settings.encoder?.toUpperCase() ?? '...'}`"></p>
       <p class="font-mono text-xs text-outline" x-text="`TARGET: ${settings.targetShortSide ?? '...'}P / QP ${settings.quality ?? '..'}`"></p>
+      <p x-show="schedule.enabled" class="font-mono text-xs text-outline"
+         x-text="`WINDOW: ${hhmm(schedule.startHour)}–${hhmm(schedule.endHour)}`"></p>
     </div>
   </aside>
 
@@ -123,14 +125,25 @@
         <h2 class="font-sans text-5xl font-extrabold leading-tight tracking-[-0.02em]">
           DATA_PROCESSOR <span class="text-outline">//</span><br>VIDEO_ENCODE
         </h2>
-        <span class="pill" :class="active ? 'text-toxic' : 'text-outline'"
-              x-text="active ? '[ ACTIVE ]' : '[ IDLE ]'"></span>
+        <span class="pill"
+              :class="active ? 'text-toxic' : scheduleHeld ? 'text-magenta-soft' : 'text-outline'"
+              x-text="active ? '[ ACTIVE ]' : scheduleHeld ? '[ WAITING FOR WINDOW ]' : '[ IDLE ]'"></span>
       </div>
 
       <div class="grid gap-8 lg:grid-cols-[1fr_2fr]">
 
         <!-- PENDING -->
         <div>
+          <div x-show="scheduleHeld" class="panel mb-3 border-magenta px-4 py-3">
+            <p class="font-mono text-xs font-bold tracking-[0.1em] text-magenta-soft"
+               x-text="`[ SCHEDULED — QUEUE RESUMES AT ${hhmm(schedule.startHour)} ]`"></p>
+            <p class="mt-1 font-mono text-xs text-on-surface-variant"
+               x-text="`${pending.length} file(s) held. Encoding runs ${hhmm(schedule.startHour)}–${hhmm(schedule.endHour)}.`"></p>
+          </div>
+
+          <p x-show="schedule.enabled && schedule.open" class="mb-3 font-mono text-xs tracking-[0.1em] text-toxic"
+             x-text="`[ WINDOW OPEN UNTIL ${hhmm(schedule.endHour)} ]`"></p>
+
           <p class="mb-3 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">PENDING_QUEUE</p>
           <div class="panel p-4">
             <p x-show="!pending.length" class="font-mono text-sm text-outline">[ EMPTY ]</p>
@@ -314,6 +327,33 @@
                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
         <span class="mt-1 block font-mono text-xs text-outline">Only used when the source audio is not already AAC.</span>
       </label>
+
+      <div class="border-t border-outline-variant pt-6">
+        <label class="flex cursor-pointer items-center gap-3">
+          <input type="checkbox" x-model="settings.scheduleEnabled" class="h-4 w-4 accent-[#00f2ff]">
+          <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">ENCODE_SCHEDULE</span>
+        </label>
+        <p class="mt-2 font-mono text-xs text-outline">
+          Only start new encodes inside this window. A file already encoding when the
+          window closes is allowed to finish.
+        </p>
+
+        <div x-show="settings.scheduleEnabled" class="mt-4 flex items-center gap-3">
+          <select x-model.number="settings.scheduleStartHour"
+                  class="flex-1 border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+            <template x-for="h in 24" :key="h">
+              <option :value="h - 1" x-text="hhmm(h - 1)"></option>
+            </template>
+          </select>
+          <span class="font-mono text-sm text-outline">→</span>
+          <select x-model.number="settings.scheduleEndHour"
+                  class="flex-1 border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+            <template x-for="h in 24" :key="h">
+              <option :value="h - 1" x-text="hhmm(h - 1)"></option>
+            </template>
+          </select>
+        </div>
+      </div>
     </div>
 
     <p x-show="settingsError" class="mt-6 font-mono text-xs text-error" x-text="settingsError"></p>

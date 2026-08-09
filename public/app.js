@@ -11,6 +11,7 @@ function app() {
     jobs: [],
     error: null,
     settingsError: null,
+    schedule: { enabled: false, open: true, startHour: 2, endHour: 6 },
 
     async boot() {
       this.$watch('view', (v) => { location.hash = `#/${v}`; });
@@ -124,7 +125,9 @@ function app() {
     },
 
     async poll() {
-      this.jobs = (await this.json('/api/jobs')).jobs;
+      const body = await this.json('/api/jobs');
+      this.jobs = body.jobs;
+      this.schedule = body.schedule;
     },
 
     get pending() {
@@ -188,6 +191,14 @@ function app() {
       const units = ['B', 'KB', 'MB', 'GB', 'TB'];
       const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
       return `${(bytes / 1024 ** i).toFixed(i ? 1 : 0)} ${units[i]}`;
+    },
+
+    hhmm(hour) {
+      return `${String(hour).padStart(2, '0')}:00`;
+    },
+
+    get scheduleHeld() {
+      return this.schedule.enabled && !this.schedule.open && this.pending.length > 0;
     },
 
     async saveSettings() {

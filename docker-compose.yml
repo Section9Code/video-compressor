@@ -7,6 +7,8 @@ services:
       - /dev/dri:/dev/dri
     group_add:
       - "${RENDER_GID}"
+    environment:
+      TZ: "${TZ:-UTC}"
     volumes:
       - "${MEDIA_DIR}:/media"
       - queue-data:/data
