@@ -19,9 +19,9 @@
 - No client-supplied path is ever used to touch the filesystem without passing through `resolveSafe`.
 - ffmpeg is always invoked via `spawn` with an argument **array**. Never a shell string, never string interpolation of filenames.
 - Encode behaviour must match `docs/videosCompress.sh`: HEVC, QP/CRF default `25`, target short side default `720`, audio copied when already AAC otherwise AAC at `128k` stereo, mp4 mapping `-map 0:v:0 -map 0:a? -sn -movflags +faststart -tag:v hvc1`, mkv mapping `-map 0 -c:s copy`, duration tolerance `3` seconds, output must be strictly smaller than the original.
-- Default settings, verbatim: `targetShortSide: 720`, `quality: 25`, `encoder: "vaapi"`, `container: "mp4"`, `audioBitrate: "128k"`, `vaapiDevice: "/dev/dri/renderD128"`.
+- Default settings, verbatim: `targetShortSide: 720`, `quality: 25`, `encoder: "vaapi"`, `container: "mp4"`, `audioBitrate: "128k"`, `vaapiDevice: "/dev/dri/renderD128"`. Task 16 adds `scheduleEnabled: false`, `scheduleStartHour: 2`, `scheduleEndHour: 6`.
 - Job statuses, verbatim: `waiting`, `processing`, `done`, `skipped`, `failed`.
-- Env vars: `MEDIA_ROOT` (default `/media`), `DB_PATH` (default `/data/queue.db`), `PORT` (default `3000`).
+- Env vars: `MEDIA_ROOT` (default `/media`), `DB_PATH` (default `/data/queue.db`), `PORT` (default `3000`), `TZ` (default UTC; only affects the encode schedule window).
 - Every path crossing the HTTP boundary, in either direction, is relative to `MEDIA_ROOT`. Absolute paths never leave the server.
 - Frontend styling follows `docs/design/design.md` ("Cybernetic Core"): zero border radius, translucent surfaces with `backdrop-blur`, 1px neon borders with glow for elevation, JetBrains Mono for every path/size/status readout, Inter for UI text, `[ BRACKETED ]` status pills.
 - Commit after every task. Conventional commit prefixes (`feat:`, `test:`, `chore:`, `fix:`).
@@ -3264,11 +3264,437 @@ git commit -m "chore: add docker packaging and readme"
 
 ---
 
+### Task 16: Encode schedule window
+
+**Files:**
+- Modify: `db.js` (settings defaults and validation)
+- Modify: `worker.js` (the predicate and the loop gate)
+- Modify: `server.js` (schedule state on `GET /api/jobs`)
+- Modify: `public/app.js`, `public/index.html` (banner and controls)
+- Modify: `docker-compose.yml`, `.env.example`, `README.md`
+- Modify: `test.js`
+
+**Interfaces:**
+- Consumes: `getSettings`, `validateSettings`, `startWorker`.
+- Produces: settings keys `scheduleEnabled` (boolean), `scheduleStartHour` (0–23), `scheduleEndHour` (0–23); `withinSchedule(date, settings) -> boolean` exported from `worker.js`; a `schedule` object on the `GET /api/jobs` response.
+
+**Behaviour:** the worker checks the window only *before* picking up a job, so a
+running encode is never interrupted by the window closing. That is the requirement,
+and it means there is no cancellation path to write.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `test.js`:
+
+```js
+import { withinSchedule } from './worker.js';
+
+describe('withinSchedule', () => {
+  const at = (hour) => new Date(2026, 0, 15, hour, 30, 0);
+  const sched = (over) => ({ ...DEFAULT_SETTINGS, ...over });
+
+  test('is always open when scheduling is disabled', () => {
+    for (const h of [0, 6, 13, 23]) {
+      assert.equal(withinSchedule(at(h), sched({ scheduleEnabled: false })), true);
+    }
+  });
+
+  test('a normal window is open inside it and shut outside it', () => {
+    const s = sched({ scheduleEnabled: true, scheduleStartHour: 2, scheduleEndHour: 6 });
+    assert.equal(withinSchedule(at(1), s), false);
+    assert.equal(withinSchedule(at(2), s), true, 'open on the start hour');
+    assert.equal(withinSchedule(at(5), s), true, 'open through the last hour');
+    assert.equal(withinSchedule(at(6), s), false, 'end hour is exclusive');
+    assert.equal(withinSchedule(at(14), s), false);
+  });
+
+  test('a window wrapping midnight is open on both sides of it', () => {
+    const s = sched({ scheduleEnabled: true, scheduleStartHour: 22, scheduleEndHour: 6 });
+    assert.equal(withinSchedule(at(21), s), false);
+    assert.equal(withinSchedule(at(22), s), true);
+    assert.equal(withinSchedule(at(23), s), true);
+    assert.equal(withinSchedule(at(0), s), true);
+    assert.equal(withinSchedule(at(5), s), true);
+    assert.equal(withinSchedule(at(6), s), false);
+  });
+});
+
+describe('schedule settings', () => {
+  test('scheduling is off by default with a 2am-6am window', () => {
+    assert.equal(DEFAULT_SETTINGS.scheduleEnabled, false);
+    assert.equal(DEFAULT_SETTINGS.scheduleStartHour, 2);
+    assert.equal(DEFAULT_SETTINGS.scheduleEndHour, 6);
+  });
+
+  test('accepts a valid window', () => {
+    const s = validateSettings({ scheduleEnabled: true, scheduleStartHour: 22, scheduleEndHour: 6 });
+    assert.equal(s.scheduleEnabled, true);
+    assert.equal(s.scheduleStartHour, 22);
+  });
+
+  for (const bad of [
+    { scheduleStartHour: 24 },
+    { scheduleStartHour: -1 },
+    { scheduleEndHour: 6.5 },
+    { scheduleEnabled: 'yes' },
+    { scheduleEnabled: true, scheduleStartHour: 3, scheduleEndHour: 3 },
+  ]) {
+    test(`rejects ${JSON.stringify(bad)}`, () => {
+      assert.throws(() => validateSettings(bad), (err) => err.status === 400);
+    });
+  }
+
+  test('an equal start and end is allowed while scheduling is off', () => {
+    assert.doesNotThrow(() => validateSettings({ scheduleStartHour: 3, scheduleEndHour: 3 }));
+  });
+});
+```
+
+Add to the existing `http api` describe block:
+
+```js
+  test('jobs response reports the schedule state', async () => {
+    await send('PUT', '/api/settings', {
+      ...DEFAULT_SETTINGS, scheduleEnabled: true, scheduleStartHour: 2, scheduleEndHour: 6,
+    });
+    const { body } = await get('/api/jobs');
+    assert.equal(body.schedule.enabled, true);
+    assert.equal(body.schedule.startHour, 2);
+    assert.equal(body.schedule.endHour, 6);
+    assert.equal(typeof body.schedule.open, 'boolean');
+
+    await send('PUT', '/api/settings', DEFAULT_SETTINGS);
+    assert.equal((await get('/api/jobs')).body.schedule.open, true, 'always open when disabled');
+  });
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `npm test`
+Expected: FAIL — `withinSchedule is not a function`, plus the default-settings
+assertions.
+
+- [ ] **Step 3: Add the settings fields and validation**
+
+In `db.js`, extend `DEFAULT_SETTINGS`:
+
+```js
+export const DEFAULT_SETTINGS = {
+  targetShortSide: 720,
+  quality: 25,
+  encoder: 'vaapi',
+  container: 'mp4',
+  audioBitrate: '128k',
+  vaapiDevice: '/dev/dri/renderD128',
+  scheduleEnabled: false,
+  scheduleStartHour: 2,
+  scheduleEndHour: 6,
+};
+```
+
+In `validateSettings`, add these checks before the `return`:
+
+```js
+  if (typeof s.scheduleEnabled !== 'boolean') {
+    throw badRequest('scheduleEnabled must be true or false');
+  }
+  for (const key of ['scheduleStartHour', 'scheduleEndHour']) {
+    if (!Number.isInteger(s[key]) || s[key] < 0 || s[key] > 23) {
+      throw badRequest(`${key} must be an integer hour between 0 and 23`);
+    }
+  }
+  // Only meaningful when the schedule is on; an equal pair would otherwise be an
+  // empty window that silently stops the queue forever.
+  if (s.scheduleEnabled && s.scheduleStartHour === s.scheduleEndHour) {
+    throw badRequest('the schedule window start and end hours must differ');
+  }
+```
+
+and add the three keys to the returned object:
+
+```js
+    scheduleEnabled: s.scheduleEnabled,
+    scheduleStartHour: s.scheduleStartHour,
+    scheduleEndHour: s.scheduleEndHour,
+```
+
+Task 5's `defaults match the shell script` test asserts `deepEqual` against a literal
+object, so it now fails. Add the three keys to that literal:
+
+```js
+      vaapiDevice: '/dev/dri/renderD128',
+      scheduleEnabled: false,
+      scheduleStartHour: 2,
+      scheduleEndHour: 6,
+    });
+```
+
+- [ ] **Step 4: Add the predicate and gate the worker loop**
+
+In `worker.js`, add `getSettings` to the import from `./db.js`, then:
+
+```js
+// The window is [start, end) in server local time, and may wrap midnight.
+// Checked only before a job is picked up: an encode already running is never
+// interrupted by the window closing.
+export function withinSchedule(date, settings) {
+  if (!settings.scheduleEnabled) return true;
+  const hour = date.getHours();
+  const { scheduleStartHour: start, scheduleEndHour: end } = settings;
+  return start < end
+    ? hour >= start && hour < end
+    : hour >= start || hour < end;
+}
+```
+
+Replace `startWorker` with:
+
+```js
+export function startWorker(db, deps) {
+  const { idleMs = 2000, now = Date.now } = deps;
+  let stopped = false;
+
+  (async () => {
+    while (!stopped) {
+      // Read live rather than from the job snapshot: this is policy about when work
+      // may start, so a schedule change should take effect immediately.
+      if (!withinSchedule(new Date(now()), getSettings(db))) {
+        await sleep(idleMs);
+        continue;
+      }
+      const job = nextWaiting(db);
+      if (!job) {
+        await sleep(idleMs);
+        continue;
+      }
+      await runJob(db, job, deps);
+    }
+  })();
+
+  return () => { stopped = true; };
+}
+```
+
+- [ ] **Step 5: Report the schedule state from the API**
+
+In `server.js`, import `withinSchedule` from `./worker.js` and replace the
+`GET /api/jobs` handler with:
+
+```js
+  app.get('/api/jobs', (req, res) => {
+    const settings = getSettings(db);
+    res.json({
+      jobs: listJobs(db).map((job) => ({
+        ...job,
+        path: rel(job.path),
+        name: path.basename(job.path),
+        final_path: rel(job.final_path),
+        trash_path: rel(job.trash_path),
+        settings: JSON.parse(job.settings_json),
+      })),
+      // Computed here, not in the browser: the server's clock is the one that
+      // actually gates the worker.
+      schedule: {
+        enabled: settings.scheduleEnabled,
+        startHour: settings.scheduleStartHour,
+        endHour: settings.scheduleEndHour,
+        open: withinSchedule(new Date(), settings),
+      },
+    });
+  });
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `npm test`
+Expected: PASS.
+
+- [ ] **Step 7: Commit the backend**
+
+```bash
+git add db.js worker.js server.js test.js
+git commit -m "feat: only start encodes inside an optional schedule window"
+```
+
+- [ ] **Step 8: Show the schedule in the queue view**
+
+In `public/app.js`, add `schedule: { enabled: false, open: true, startHour: 2, endHour: 6 },`
+to the state and replace `poll` with:
+
+```js
+    async poll() {
+      const body = await this.json('/api/jobs');
+      this.jobs = body.jobs;
+      this.schedule = body.schedule;
+    },
+```
+
+Add two helpers next to `fmtSize`:
+
+```js
+    hhmm(hour) {
+      return `${String(hour).padStart(2, '0')}:00`;
+    },
+
+    get scheduleHeld() {
+      return this.schedule.enabled && !this.schedule.open && this.pending.length > 0;
+    },
+```
+
+In `public/index.html`, insert directly above the `PENDING_QUEUE` label
+(`<p class="mb-3 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">PENDING_QUEUE</p>`):
+
+```html
+          <div x-show="scheduleHeld" class="panel mb-3 border-magenta px-4 py-3">
+            <p class="font-mono text-xs font-bold tracking-[0.1em] text-magenta-soft"
+               x-text="`[ SCHEDULED — QUEUE RESUMES AT ${hhmm(schedule.startHour)} ]`"></p>
+            <p class="mt-1 font-mono text-xs text-on-surface-variant"
+               x-text="`${pending.length} file(s) held. Encoding runs ${hhmm(schedule.startHour)}–${hhmm(schedule.endHour)}.`"></p>
+          </div>
+
+          <p x-show="schedule.enabled && schedule.open" class="mb-3 font-mono text-xs tracking-[0.1em] text-toxic"
+             x-text="`[ WINDOW OPEN UNTIL ${hhmm(schedule.endHour)} ]`"></p>
+```
+
+Also change the `[ ACTIVE ] / [ IDLE ]` pill at the top of the queue view so a held
+queue does not read as merely idle. Replace that `<span>` with:
+
+```html
+        <span class="pill"
+              :class="active ? 'text-toxic' : scheduleHeld ? 'text-magenta-soft' : 'text-outline'"
+              x-text="active ? '[ ACTIVE ]' : scheduleHeld ? '[ WAITING FOR WINDOW ]' : '[ IDLE ]'"></span>
+```
+
+- [ ] **Step 9: Add the schedule controls to the settings panel**
+
+In `public/index.html`, inside the settings panel's `<div class="mt-8 flex flex-col gap-6">`,
+after the AUDIO_BITRATE label, add:
+
+```html
+      <div class="border-t border-outline-variant pt-6">
+        <label class="flex cursor-pointer items-center gap-3">
+          <input type="checkbox" x-model="settings.scheduleEnabled" class="h-4 w-4 accent-[#00f2ff]">
+          <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">ENCODE_SCHEDULE</span>
+        </label>
+        <p class="mt-2 font-mono text-xs text-outline">
+          Only start new encodes inside this window. A file already encoding when the
+          window closes is allowed to finish.
+        </p>
+
+        <div x-show="settings.scheduleEnabled" class="mt-4 flex items-center gap-3">
+          <select x-model.number="settings.scheduleStartHour"
+                  class="flex-1 border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+            <template x-for="h in 24" :key="h">
+              <option :value="h - 1" x-text="hhmm(h - 1)"></option>
+            </template>
+          </select>
+          <span class="font-mono text-sm text-outline">→</span>
+          <select x-model.number="settings.scheduleEndHour"
+                  class="flex-1 border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+            <template x-for="h in 24" :key="h">
+              <option :value="h - 1" x-text="hhmm(h - 1)"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+```
+
+In the sidebar footer, add a third line under the existing two:
+
+```html
+      <p x-show="schedule.enabled" class="font-mono text-xs text-outline"
+         x-text="`WINDOW: ${hhmm(schedule.startHour)}–${hhmm(schedule.endHour)}`"></p>
+```
+
+- [ ] **Step 10: Verify by hand**
+
+```bash
+npm run build
+MEDIA_ROOT=/tmp/vc-media DB_PATH=/tmp/vc-data/queue.db node server.js
+```
+
+Queue two or three files, then open ENCODE_PARAMS, tick ENCODE_SCHEDULE and set a
+window that does **not** contain the current time (e.g. if it is 15:00, set 02:00 → 06:00).
+Save.
+
+Expected within two seconds: the magenta `[ SCHEDULED — QUEUE RESUMES AT 02:00 ]`
+banner appears above PENDING_QUEUE, the header pill reads `[ WAITING FOR WINDOW ]`,
+the sidebar shows `WINDOW: 02:00–06:00`, and no job moves to `processing`.
+
+Now set the window to one that **does** contain the current time (e.g. 00:00 → 23:00).
+Expected: the banner is replaced by the green `[ WINDOW OPEN UNTIL 23:00 ]` line and
+the first job starts within two seconds.
+
+To confirm a running encode is not interrupted: with a job actively encoding, set the
+window to one that excludes now. Expected: the active job's percentage keeps climbing
+to completion, and only then does the queue stall with the banner shown.
+
+Finally, untick ENCODE_SCHEDULE and confirm the queue drains continuously with no
+schedule UI shown at all.
+
+- [ ] **Step 11: Set the container timezone**
+
+Without `TZ` the container runs on UTC and a "2am" window fires at the wrong local
+time. In `docker-compose.yml`, add to the service:
+
+```yaml
+    environment:
+      TZ: "${TZ:-UTC}"
+```
+
+In `.env.example`, add:
+
+```
+# Timezone the encode schedule is evaluated in. Without this the container runs on
+# UTC and a 2am window fires at the wrong local time.  cat /etc/timezone
+TZ=Europe/London
+```
+
+In `README.md`, add `TZ` to the configuration table:
+
+```
+| `TZ` | `UTC` | Timezone the encode schedule window is evaluated in |
+```
+
+and add this section after "How it works":
+
+```markdown
+## Scheduling
+
+By default the queue drains as soon as you add to it. Under ENCODE_PARAMS you can
+restrict encoding to a nightly window — 02:00 to 06:00, say. Windows that wrap
+midnight (22:00 → 06:00) work.
+
+The window only gates *starting* a file. If an encode is running when the window
+closes it finishes normally; the worker simply does not pick up the next one. While
+the queue is held the DATA_PROCESSOR view says so.
+
+The window is evaluated in the server's local timezone, so set `TZ` in `.env`.
+```
+
+- [ ] **Step 12: Verify in Docker and commit**
+
+```bash
+docker compose build
+docker compose up -d
+docker compose exec video-compressor date
+```
+
+Expected: `date` prints your local time, not UTC.
+
+```bash
+git add public/index.html public/app.js docker-compose.yml .env.example README.md
+git commit -m "feat: surface the encode schedule in the UI and set container TZ"
+```
+
+---
+
 ## Self-Review Notes
 
 Checked against the spec:
 
-- Every spec section maps to a task: path safety → 1, dimension maths → 2, scanning → 3, data model and recovery → 4, settings → 5, encode commands → 6, verification → 7, progress and trash → 8, worker → 9, API → 10, Tailwind → 11, browse view → 12, queue view → 13, settings panel → 14, Docker and docs → 15.
+- Every spec section maps to a task: path safety → 1, dimension maths → 2, scanning → 3, data model and recovery → 4, settings → 5, encode commands → 6, verification → 7, progress and trash → 8, worker → 9, API → 10, Tailwind → 11, browse view → 12, queue view → 13, settings panel → 14, Docker and docs → 15, scheduling → 16.
+- Task 16 is a full-stack slice rather than four edits spread through the earlier tasks. It arrived after tasks 1–15 were written, and scheduling reviews as one thing — predicate, gate, API field, banner, controls, timezone. Splitting it across the existing numbering would have made every earlier task's diff misleading. It does force one edit back into Task 5's test, which step 3 spells out.
 - `started_at` was not in the spec's schema. The spec's ACTIVE_PROCESS card requires a TIME_REMAINING readout, which needs an encode start time. Task 13 adds the column, the writable-field entry, the worker write and a test.
 - `POST /api/jobs` resolves and probes every path before inserting any of them, so one bad path rejects the whole request rather than half-queueing it. The API test asserts this.
 - Names are consistent across tasks: `resolveSafe`, `wouldReduce`, `targetDims`, `scanTree`, `probeVideo`, `probeAudioCodec`, `listDirs`, `open`, `addJobs`, `listJobs`, `getJob`, `nextWaiting`, `updateJob`, `deleteJob`, `requeueJob`, `recoverProcessing`, `validateSettings`, `getSettings`, `putSettings`, `buildEncodeArgs`, `verifyEncode`, `createProgressParser`, `percentFrom`, `swapInPlace`, `tempPathFor`, `finalPathFor`, `runJob`, `startWorker`, `cleanupTempFiles`, `createApp`.

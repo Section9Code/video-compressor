@@ -17,6 +17,7 @@ closely in encode behaviour.
 | Folder scan | Recursive; shows every video found, pre-selects only those that would shrink |
 | Settings | Global panel, snapshotted onto each job at enqueue time |
 | Worker | One job at a time, drains automatically, resumes after restart |
+| Schedule | Optional nightly window; a running encode is never interrupted by the window closing |
 | Browse scope | Single `MEDIA_ROOT`, enforced server-side |
 | Progress | Real percent, parsed from `ffmpeg -progress` |
 | Deployment | Docker, with `/dev/dri` passed through; software encode as a fallback |
@@ -102,13 +103,54 @@ One row, defaulted from the script:
   encoder: "vaapi",          // vaapi | qsv | software
   container: "mp4",          // mp4 | mkv
   audioBitrate: "128k",
-  vaapiDevice: "/dev/dri/renderD128"
+  vaapiDevice: "/dev/dri/renderD128",
+  scheduleEnabled: false,    // when true, only start encodes inside the window
+  scheduleStartHour: 2,      // 0-23, server local time
+  scheduleEndHour: 6         // 0-23, exclusive
 }
 ```
 
 `PUT /api/settings` validates each field against its allowed set or range and rejects
 the whole body on any violation. Changing settings never touches an existing job —
 each job carries the snapshot it was created with in `settings_json`.
+
+The three schedule fields are the exception to the snapshot rule. They are runtime
+policy about *when* work may start, not about *how* a file is encoded, so the worker
+reads them live from the settings row on every loop and a change takes effect
+immediately. They are still stored in each job's snapshot — harmlessly — because the
+snapshot is the whole settings object.
+
+## Scheduling
+
+When `scheduleEnabled` is false the worker drains the queue continuously, which is
+the default.
+
+When it is true, the worker only *starts* a job if the current hour is inside
+`[scheduleStartHour, scheduleEndHour)` in the server's local time. Windows that wrap
+midnight are supported: `22 → 6` means 22:00–05:59.
+
+A window closing never interrupts anything, because the check happens once, before a
+job is picked up. An encode that begins at 05:59 runs to completion; the worker then
+finds the window shut and waits rather than starting the next file. This is the
+behaviour asked for, and it also falls out of the design for free — there is no
+cancellation path to write.
+
+Hours only, no minutes. A media re-encode queue does not need 06:15 precision, and
+two `<select>` elements beat a time picker.
+
+`GET /api/jobs` carries the current schedule state alongside the rows:
+
+```js
+{ jobs: [...], schedule: { enabled: true, startHour: 2, endHour: 6, open: false } }
+```
+
+`open` is computed server-side, because the server's clock and timezone are the ones
+that actually gate the worker — deriving it in the browser would show the wrong thing
+whenever the two disagree.
+
+**Timezone:** in Docker this depends on `TZ`. Without it the container runs on UTC and
+a "2am" window fires at the wrong local time. `TZ` is therefore set in
+`docker-compose.yml` and documented in the README.
 
 ## HTTP API
 
@@ -172,9 +214,11 @@ a tool used a handful of times a week.
 
 ## Worker
 
-A single async loop, started once at boot. It takes the lowest-`id` `waiting` job,
-sets it `processing`, and runs one encode. When the queue is empty it sleeps 2s and
-looks again. There is no start/stop control — adding files is the start signal.
+A single async loop, started once at boot. Each iteration: if the schedule window is
+shut, sleep 2s and look again; otherwise take the lowest-`id` `waiting` job, set it
+`processing`, and run one encode. When the queue is empty it also sleeps 2s. There is
+no start/stop control — adding files is the start signal, and the schedule is the only
+thing that holds work back.
 
 ### Target dimensions
 
@@ -316,7 +360,10 @@ button, which POSTs the selection and switches to the queue view.
 
 Modelled on `docs/design/stitch_cyberdeck_file_explorer/data_processor_desktop`.
 
-- **PENDING_QUEUE** — waiting jobs, filename over `size | WxH`, each with a remove button.
+- **PENDING_QUEUE** — waiting jobs, filename over `size | WxH`, each with a remove
+  button. When the schedule is on and the window is shut, a banner sits above the list:
+  `[ SCHEDULED — QUEUE RESUMES AT 02:00 ]`. When the window is open, the header carries
+  a quieter `[ WINDOW OPEN UNTIL 06:00 ]`. Nothing is shown at all when scheduling is off.
 - **ACTIVE_PROCESS** — the running job: filename, target encoding and dimensions, big
   percentage, the segmented "data stream" bar from the design doc, and readouts for
   time remaining (extrapolated from percent and elapsed) and current bitrate. The
@@ -347,6 +394,7 @@ in the final layer.
 | `MEDIA_ROOT` | `/media` | The only directory the app can see |
 | `DB_PATH` | `/data/queue.db` | SQLite file |
 | `PORT` | `3000` | HTTP port |
+| `TZ` | unset (UTC) | Timezone the encode schedule window is evaluated in |
 
 Run:
 
@@ -356,6 +404,7 @@ docker run -d \
   --group-add "$(getent group render | cut -d: -f3)" \
   -v /your/media:/media \
   -v video-compressor-data:/data \
+  -e TZ="$(cat /etc/timezone)" \
   -p 3000:3000 \
   video-compressor
 ```
@@ -388,6 +437,8 @@ One `test.js` using `node:test`, covering only the logic that can be silently wr
 4. **The verify predicate** — a table over exit code, temp size, duration delta at
    exactly ±3s and ±4s, and new-size-vs-original, asserting `done` / `skipped` /
    `failed`.
+5. **The schedule window** — disabled always open; a normal window at its start hour,
+   last hour and end hour; a window wrapping midnight on both sides of the boundary.
 
 No framework, no fixtures, no HTTP-level tests. `npm test` runs it.
 
