@@ -45,3 +45,32 @@ export function buildEncodeArgs({ src, tmp, settings, width, height, audioCodec 
 
   return [...base, ...video, ...audio, ...map, tmp];
 }
+
+export const DURATION_TOLERANCE = 3;
+
+// Nothing touches the original until all of these hold. Order matters: an ffmpeg
+// failure is more informative than the empty file it leaves behind.
+export function verifyEncode({ exitCode, tmpSize, origSize, origDuration, newDuration }) {
+  if (exitCode !== 0) {
+    return { status: 'failed', reason: `ffmpeg exited with code ${exitCode}` };
+  }
+  if (!tmpSize) {
+    return { status: 'failed', reason: 'output file is missing or empty' };
+  }
+  if (!(origDuration > 0) || !(newDuration > 0)) {
+    return { status: 'failed', reason: 'could not read duration of original or output' };
+  }
+  if (Math.abs(newDuration - origDuration) > DURATION_TOLERANCE) {
+    return {
+      status: 'failed',
+      reason: `duration mismatch (original ${origDuration}s vs output ${newDuration}s)`,
+    };
+  }
+  if (tmpSize >= origSize) {
+    return {
+      status: 'skipped',
+      reason: `output not smaller (${origSize} -> ${tmpSize} bytes)`,
+    };
+  }
+  return { status: 'done' };
+}

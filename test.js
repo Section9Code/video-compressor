@@ -491,3 +491,56 @@ describe('buildEncodeArgs', () => {
     assert.equal(args.at(-1), '/media/.in put.tmp.mp4');
   });
 });
+
+import { verifyEncode, DURATION_TOLERANCE } from './encode.js';
+
+describe('verifyEncode', () => {
+  const good = { exitCode: 0, tmpSize: 400, origSize: 1000, origDuration: 60, newDuration: 60 };
+
+  test('the tolerance matches the shell script', () => {
+    assert.equal(DURATION_TOLERANCE, 3);
+  });
+
+  test('passes a clean encode', () => {
+    assert.deepEqual(verifyEncode(good), { status: 'done' });
+  });
+
+  test('fails on a non-zero exit code even if the output looks fine', () => {
+    assert.equal(verifyEncode({ ...good, exitCode: 1 }).status, 'failed');
+  });
+
+  test('fails on an empty output file', () => {
+    assert.equal(verifyEncode({ ...good, tmpSize: 0 }).status, 'failed');
+  });
+
+  test('fails when either duration is unreadable', () => {
+    assert.equal(verifyEncode({ ...good, newDuration: null }).status, 'failed');
+    assert.equal(verifyEncode({ ...good, origDuration: 0 }).status, 'failed');
+  });
+
+  test('tolerates a drift of exactly the tolerance in both directions', () => {
+    assert.equal(verifyEncode({ ...good, newDuration: 63 }).status, 'done');
+    assert.equal(verifyEncode({ ...good, newDuration: 57 }).status, 'done');
+  });
+
+  test('fails one second beyond the tolerance in both directions', () => {
+    assert.equal(verifyEncode({ ...good, newDuration: 64 }).status, 'failed');
+    assert.equal(verifyEncode({ ...good, newDuration: 56 }).status, 'failed');
+  });
+
+  test('skips rather than fails when the output is not smaller', () => {
+    assert.equal(verifyEncode({ ...good, tmpSize: 1000 }).status, 'skipped');
+    assert.equal(verifyEncode({ ...good, tmpSize: 1200 }).status, 'skipped');
+  });
+
+  test('passes when the output is smaller by a single byte', () => {
+    assert.equal(verifyEncode({ ...good, tmpSize: 999 }).status, 'done');
+  });
+
+  test('every non-done result carries a reason', () => {
+    for (const bad of [{ exitCode: 1 }, { tmpSize: 0 }, { newDuration: 100 }, { tmpSize: 1000 }]) {
+      const result = verifyEncode({ ...good, ...bad });
+      assert.ok(result.reason, `no reason for ${JSON.stringify(bad)}`);
+    }
+  });
+});
