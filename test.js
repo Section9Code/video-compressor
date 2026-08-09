@@ -333,3 +333,71 @@ describe('jobs table', () => {
     assert.equal(recoverProcessing(db).length, 0);
   });
 });
+
+import { DEFAULT_SETTINGS, validateSettings, getSettings, putSettings } from './db.js';
+
+describe('settings', () => {
+  test('defaults match the shell script', () => {
+    assert.deepEqual(DEFAULT_SETTINGS, {
+      targetShortSide: 720,
+      quality: 25,
+      encoder: 'vaapi',
+      container: 'mp4',
+      audioBitrate: '128k',
+      vaapiDevice: '/dev/dri/renderD128',
+    });
+  });
+
+  test('getSettings returns the defaults before anything is saved', () => {
+    const db = open(':memory:');
+    assert.deepEqual(getSettings(db), DEFAULT_SETTINGS);
+  });
+
+  test('putSettings persists and getSettings reads back', () => {
+    const db = open(':memory:');
+    putSettings(db, { ...DEFAULT_SETTINGS, quality: 28, encoder: 'software' });
+    assert.equal(getSettings(db).quality, 28);
+    assert.equal(getSettings(db).encoder, 'software');
+  });
+
+  test('putSettings overwrites rather than accumulating rows', () => {
+    const db = open(':memory:');
+    putSettings(db, { ...DEFAULT_SETTINGS, quality: 28 });
+    putSettings(db, { ...DEFAULT_SETTINGS, quality: 22 });
+    assert.equal(getSettings(db).quality, 22);
+  });
+
+  test('a partial body is merged onto the defaults', () => {
+    assert.deepEqual(validateSettings({ quality: 20 }), { ...DEFAULT_SETTINGS, quality: 20 });
+  });
+
+  test('unknown keys are stripped', () => {
+    assert.deepEqual(validateSettings({ evil: true }), DEFAULT_SETTINGS);
+  });
+
+  for (const bad of [
+    { targetShortSide: 999 },
+    { targetShortSide: '720' },
+    { quality: 17 },
+    { quality: 33 },
+    { quality: 25.5 },
+    { encoder: 'nvenc' },
+    { container: 'avi' },
+    { audioBitrate: '128' },
+    { audioBitrate: '128k; rm -rf /' },
+    { vaapiDevice: '/etc/passwd' },
+  ]) {
+    test(`rejects ${JSON.stringify(bad)}`, () => {
+      assert.throws(() => validateSettings(bad), (err) => err.status === 400);
+    });
+  }
+
+  test('accepts every allowed target and encoder', () => {
+    for (const targetShortSide of [480, 540, 720, 1080, 1440]) {
+      assert.equal(validateSettings({ targetShortSide }).targetShortSide, targetShortSide);
+    }
+    for (const encoder of ['vaapi', 'qsv', 'software']) {
+      assert.equal(validateSettings({ encoder }).encoder, encoder);
+    }
+  });
+});

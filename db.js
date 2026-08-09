@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { badRequest } from './media.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -101,4 +102,65 @@ export function recoverProcessing(db) {
   const rows = db.prepare("SELECT * FROM jobs WHERE status = 'processing'").all();
   db.exec("UPDATE jobs SET status = 'waiting', progress = 0, bitrate = NULL WHERE status = 'processing'");
   return rows;
+}
+
+export const DEFAULT_SETTINGS = {
+  targetShortSide: 720,
+  quality: 25,
+  encoder: 'vaapi',
+  container: 'mp4',
+  audioBitrate: '128k',
+  vaapiDevice: '/dev/dri/renderD128',
+};
+
+export const TARGETS = [480, 540, 720, 1080, 1440];
+export const ENCODERS = ['vaapi', 'qsv', 'software'];
+export const CONTAINERS = ['mp4', 'mkv'];
+
+// This is a trust boundary: every value here ends up in an ffmpeg argument list.
+export function validateSettings(input) {
+  const s = { ...DEFAULT_SETTINGS, ...(input ?? {}) };
+
+  if (!TARGETS.includes(s.targetShortSide)) {
+    throw badRequest(`targetShortSide must be one of ${TARGETS.join(', ')}`);
+  }
+  if (!Number.isInteger(s.quality) || s.quality < 18 || s.quality > 32) {
+    throw badRequest('quality must be an integer between 18 and 32');
+  }
+  if (!ENCODERS.includes(s.encoder)) {
+    throw badRequest(`encoder must be one of ${ENCODERS.join(', ')}`);
+  }
+  if (!CONTAINERS.includes(s.container)) {
+    throw badRequest(`container must be one of ${CONTAINERS.join(', ')}`);
+  }
+  if (typeof s.audioBitrate !== 'string' || !/^\d{1,4}k$/.test(s.audioBitrate)) {
+    throw badRequest('audioBitrate must look like "128k"');
+  }
+  if (typeof s.vaapiDevice !== 'string' || !/^\/dev\/dri\/[A-Za-z0-9]+$/.test(s.vaapiDevice)) {
+    throw badRequest('vaapiDevice must be a /dev/dri device path');
+  }
+
+  return {
+    targetShortSide: s.targetShortSide,
+    quality: s.quality,
+    encoder: s.encoder,
+    container: s.container,
+    audioBitrate: s.audioBitrate,
+    vaapiDevice: s.vaapiDevice,
+  };
+}
+
+export function getSettings(db) {
+  const row = db.prepare('SELECT json FROM settings WHERE id = 1').get();
+  if (!row) return { ...DEFAULT_SETTINGS };
+  return { ...DEFAULT_SETTINGS, ...JSON.parse(row.json) };
+}
+
+export function putSettings(db, input) {
+  const settings = validateSettings(input);
+  db.prepare(`
+    INSERT INTO settings (id, json) VALUES (1, ?)
+    ON CONFLICT (id) DO UPDATE SET json = excluded.json
+  `).run(JSON.stringify(settings));
+  return settings;
 }
