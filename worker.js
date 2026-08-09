@@ -1,0 +1,161 @@
+import { spawn as nodeSpawn } from 'node:child_process';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+
+import { nextWaiting, updateJob } from './db.js';
+import { buildEncodeArgs, createProgressParser, percentFrom, swapInPlace, verifyEncode } from './encode.js';
+import { probeAudioCodec as realProbeAudio, probeVideo as realProbeVideo } from './media.js';
+
+const STDERR_TAIL_BYTES = 4096;
+
+export function tempPathFor(src, container) {
+  const dir = path.dirname(src);
+  const name = path.basename(src, path.extname(src));
+  return path.join(dir, `.${name}.tmp.${container}`);
+}
+
+export function finalPathFor(src, container) {
+  const dir = path.dirname(src);
+  const name = path.basename(src, path.extname(src));
+  return path.join(dir, `${name}.${container}`);
+}
+
+async function unlinkQuietly(file) {
+  await fsp.unlink(file).catch(() => {});
+}
+
+export async function cleanupTempFiles(rows) {
+  for (const row of rows) {
+    const container = JSON.parse(row.settings_json).container;
+    await unlinkQuietly(tempPathFor(row.path, container));
+  }
+}
+
+// Runs ffmpeg and reports progress. Resolves with the exit code and the stderr tail.
+function runFfmpeg({ spawn, args, durationSeconds, onProgress }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', args);
+    const feed = createProgressParser();
+    let stderr = '';
+
+    child.stdout.setEncoding?.('utf8');
+    child.stderr.setEncoding?.('utf8');
+
+    child.stdout.on('data', (chunk) => {
+      for (const block of feed(String(chunk))) {
+        onProgress({ percent: percentFrom(block, durationSeconds), bitrate: block.bitrate ?? null });
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr = (stderr + String(chunk)).slice(-STDERR_TAIL_BYTES);
+    });
+
+    child.on('error', reject);
+    child.on('close', (exitCode) => resolve({ exitCode, stderr }));
+  });
+}
+
+export async function runJob(db, job, deps) {
+  const {
+    mediaRoot,
+    spawn = nodeSpawn,
+    probeVideo = realProbeVideo,
+    probeAudioCodec = realProbeAudio,
+    now = Date.now,
+    progressIntervalMs = 1000,
+  } = deps;
+
+  const settings = JSON.parse(job.settings_json);
+  const tmp = tempPathFor(job.path, settings.container);
+  const final = finalPathFor(job.path, settings.container);
+
+  updateJob(db, job.id, { status: 'processing', progress: 0, bitrate: null, error: null });
+
+  const fail = async (reason) => {
+    await unlinkQuietly(tmp);
+    updateJob(db, job.id, { status: 'failed', error: reason, finished_at: now() });
+  };
+
+  try {
+    const origSize = (await fsp.stat(job.path)).size;
+    const audioCodec = await probeAudioCodec(job.path);
+
+    const args = buildEncodeArgs({
+      src: job.path,
+      tmp,
+      settings,
+      width: job.width,
+      height: job.height,
+      audioCodec,
+    });
+
+    let lastWrite = 0;
+    const { exitCode, stderr } = await runFfmpeg({
+      spawn,
+      args,
+      durationSeconds: job.duration,
+      onProgress: ({ percent, bitrate }) => {
+        const t = now();
+        if (t - lastWrite < progressIntervalMs) return;
+        lastWrite = t;
+        updateJob(db, job.id, { progress: percent ?? 0, bitrate });
+      },
+    });
+
+    const tmpSize = await fsp.stat(tmp).then((s) => s.size, () => 0);
+    const newInfo = tmpSize ? await probeVideo(tmp).catch(() => null) : null;
+
+    const result = verifyEncode({
+      exitCode,
+      tmpSize,
+      origSize,
+      origDuration: job.duration,
+      newDuration: newInfo?.duration ?? null,
+    });
+
+    if (result.status === 'failed') {
+      return await fail(stderr.trim() ? `${result.reason}\n${stderr.trim()}` : result.reason);
+    }
+
+    if (result.status === 'skipped') {
+      await unlinkQuietly(tmp);
+      updateJob(db, job.id, {
+        status: 'skipped', error: result.reason, new_size: tmpSize, finished_at: now(),
+      });
+      return;
+    }
+
+    const trashPath = await swapInPlace({ src: job.path, tmp, final, mediaRoot });
+    updateJob(db, job.id, {
+      status: 'done',
+      progress: 100,
+      new_size: tmpSize,
+      final_path: final,
+      trash_path: trashPath,
+      finished_at: now(),
+    });
+  } catch (err) {
+    await fail(err.message);
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function startWorker(db, deps) {
+  const { idleMs = 2000 } = deps;
+  let stopped = false;
+
+  (async () => {
+    while (!stopped) {
+      const job = nextWaiting(db);
+      if (!job) {
+        await sleep(idleMs);
+        continue;
+      }
+      await runJob(db, job, deps);
+    }
+  })();
+
+  return () => { stopped = true; };
+}

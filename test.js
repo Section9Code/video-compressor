@@ -703,3 +703,153 @@ describe('swapInPlace', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 });
+
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import { runJob, tempPathFor } from './worker.js';
+
+function fakeSpawn({ exitCode = 0, stdout = '', stderr = '', writesOutput = null } = {}) {
+  const calls = [];
+  const spawn = (bin, args) => {
+    calls.push({ bin, args });
+    if (writesOutput) fs.writeFileSync(args.at(-1), writesOutput);
+    const child = new EventEmitter();
+    child.stdout = Readable.from([stdout]);
+    child.stderr = Readable.from([stderr]);
+    // Attach 'end' synchronously: the stream stays paused until runFfmpeg adds its
+    // own 'data' listener, so this cannot fire early. Deferring the attach with
+    // setImmediate misses 'end' entirely, because Readable.from flushes on a
+    // nextTick chain that drains before the check phase.
+    child.stdout.on('end', () => setImmediate(() => child.emit('close', exitCode)));
+    return child;
+  };
+  spawn.calls = calls;
+  return spawn;
+}
+
+describe('runJob', () => {
+  let root;
+
+  const prepare = (contents = 'x'.repeat(1000)) => {
+    root = fs.realpathSync(tmpdir('vc-job-'));
+    fs.mkdirSync(path.join(root, 'movies'));
+    const src = path.join(root, 'movies', 'clip.mkv');
+    fs.writeFileSync(src, contents);
+
+    const db = open(':memory:');
+    addJobs(db, [{ path: src, width: 1920, height: 1080, codec: 'h264', size: contents.length, duration: 60 }], SAMPLE_SETTINGS);
+    return { db, src, job: nextWaiting(db) };
+  };
+
+  const deps = (over = {}) => ({
+    mediaRoot: root,
+    probeVideo: async () => ({ codec: 'hevc', width: 1280, height: 720, duration: 60 }),
+    probeAudioCodec: async () => 'ac3',
+    now: () => 1700000000000,
+    ...over,
+  });
+
+  test('a successful encode marks the job done and trashes the original', async () => {
+    const { db, src, job } = prepare();
+    const spawn = fakeSpawn({ writesOutput: 'small', stdout: 'out_time_us=60000000\nprogress=end\n' });
+
+    await runJob(db, job, deps({ spawn }));
+
+    const row = getJob(db, job.id);
+    assert.equal(row.status, 'done');
+    assert.equal(row.new_size, 5);
+    assert.equal(row.progress, 100);
+    assert.equal(row.final_path, path.join(root, 'movies', 'clip.mp4'));
+    assert.equal(row.trash_path, path.join(root, '.trash', 'movies', 'clip.mkv'));
+    assert.equal(row.finished_at, 1700000000000);
+    assert.equal(fs.existsSync(src), false);
+    assert.equal(fs.readFileSync(row.final_path, 'utf8'), 'small');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('the encode uses the job settings snapshot, not current settings', async () => {
+    const { db, job } = prepare();
+    putSettings(db, { ...SAMPLE_SETTINGS, quality: 32, encoder: 'software' });
+    const spawn = fakeSpawn({ writesOutput: 'small' });
+
+    await runJob(db, job, deps({ spawn }));
+
+    const args = spawn.calls[0].args;
+    assert.ok(args.includes('hevc_vaapi'), 'snapshot said vaapi');
+    assert.equal(args[args.indexOf('-qp') + 1], '25', 'snapshot said quality 25');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('progress is written to the row while encoding', async () => {
+    const { db, job } = prepare();
+    const spawn = fakeSpawn({
+      writesOutput: 'small',
+      stdout: 'bitrate=900.0kbits/s\nout_time_us=30000000\nprogress=continue\n',
+    });
+
+    await runJob(db, job, deps({ spawn, progressIntervalMs: 0 }));
+
+    assert.equal(getJob(db, job.id).bitrate, '900.0kbits/s');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('a non-zero exit marks the job failed, keeps the original and stores stderr', async () => {
+    const { db, src, job } = prepare();
+    const spawn = fakeSpawn({ exitCode: 1, stderr: 'Device creation failed' });
+
+    await runJob(db, job, deps({ spawn }));
+
+    const row = getJob(db, job.id);
+    assert.equal(row.status, 'failed');
+    assert.match(row.error, /Device creation failed/);
+    assert.equal(fs.existsSync(src), true, 'original must survive a failure');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('an output that is not smaller marks the job skipped and deletes the temp file', async () => {
+    const { db, src, job } = prepare('x'.repeat(100));
+    const spawn = fakeSpawn({ writesOutput: 'y'.repeat(500) });
+
+    await runJob(db, job, deps({ spawn }));
+
+    const row = getJob(db, job.id);
+    assert.equal(row.status, 'skipped');
+    assert.match(row.error, /not smaller/);
+    assert.equal(fs.existsSync(src), true);
+    assert.equal(fs.existsSync(tempPathFor(src, 'mp4')), false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('a duration mismatch marks the job failed and deletes the temp file', async () => {
+    const { db, src, job } = prepare();
+    const spawn = fakeSpawn({ writesOutput: 'small' });
+
+    await runJob(db, job, deps({
+      spawn,
+      probeVideo: async () => ({ codec: 'hevc', width: 1280, height: 720, duration: 20 }),
+    }));
+
+    const row = getJob(db, job.id);
+    assert.equal(row.status, 'failed');
+    assert.match(row.error, /duration mismatch/);
+    assert.equal(fs.existsSync(src), true);
+    assert.equal(fs.existsSync(tempPathFor(src, 'mp4')), false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('a source that vanished before its turn fails cleanly', async () => {
+    const { db, src, job } = prepare();
+    fs.unlinkSync(src);
+
+    await runJob(db, job, deps({ spawn: fakeSpawn() }));
+
+    assert.equal(getJob(db, job.id).status, 'failed');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('tempPathFor', () => {
+  test('hides the temp file and gives it the target extension', () => {
+    assert.equal(tempPathFor('/media/movies/a b.mkv', 'mp4'), '/media/movies/.a b.tmp.mp4');
+  });
+});
