@@ -383,6 +383,9 @@ describe('settings', () => {
       container: 'mp4',
       audioBitrate: '128k',
       vaapiDevice: '/dev/dri/renderD128',
+      scheduleEnabled: false,
+      scheduleStartHour: 2,
+      scheduleEndHour: 6,
     });
   });
 
@@ -1059,5 +1062,81 @@ describe('http api', () => {
     const { status } = await send('POST', '/api/jobs', { paths: ['movies/small.mp4', '../etc/passwd'] });
     assert.equal(status, 400);
     assert.equal((await get('/api/jobs')).body.jobs.length, before);
+  });
+
+  test('jobs response reports the schedule state', async () => {
+    await send('PUT', '/api/settings', {
+      ...DEFAULT_SETTINGS, scheduleEnabled: true, scheduleStartHour: 2, scheduleEndHour: 6,
+    });
+    const { body } = await get('/api/jobs');
+    assert.equal(body.schedule.enabled, true);
+    assert.equal(body.schedule.startHour, 2);
+    assert.equal(body.schedule.endHour, 6);
+    assert.equal(typeof body.schedule.open, 'boolean');
+
+    await send('PUT', '/api/settings', DEFAULT_SETTINGS);
+    assert.equal((await get('/api/jobs')).body.schedule.open, true, 'always open when disabled');
+  });
+});
+
+import { withinSchedule } from './worker.js';
+
+describe('withinSchedule', () => {
+  const at = (hour) => new Date(2026, 0, 15, hour, 30, 0);
+  const sched = (over) => ({ ...DEFAULT_SETTINGS, ...over });
+
+  test('is always open when scheduling is disabled', () => {
+    for (const h of [0, 6, 13, 23]) {
+      assert.equal(withinSchedule(at(h), sched({ scheduleEnabled: false })), true);
+    }
+  });
+
+  test('a normal window is open inside it and shut outside it', () => {
+    const s = sched({ scheduleEnabled: true, scheduleStartHour: 2, scheduleEndHour: 6 });
+    assert.equal(withinSchedule(at(1), s), false);
+    assert.equal(withinSchedule(at(2), s), true, 'open on the start hour');
+    assert.equal(withinSchedule(at(5), s), true, 'open through the last hour');
+    assert.equal(withinSchedule(at(6), s), false, 'end hour is exclusive');
+    assert.equal(withinSchedule(at(14), s), false);
+  });
+
+  test('a window wrapping midnight is open on both sides of it', () => {
+    const s = sched({ scheduleEnabled: true, scheduleStartHour: 22, scheduleEndHour: 6 });
+    assert.equal(withinSchedule(at(21), s), false);
+    assert.equal(withinSchedule(at(22), s), true);
+    assert.equal(withinSchedule(at(23), s), true);
+    assert.equal(withinSchedule(at(0), s), true);
+    assert.equal(withinSchedule(at(5), s), true);
+    assert.equal(withinSchedule(at(6), s), false);
+  });
+});
+
+describe('schedule settings', () => {
+  test('scheduling is off by default with a 2am-6am window', () => {
+    assert.equal(DEFAULT_SETTINGS.scheduleEnabled, false);
+    assert.equal(DEFAULT_SETTINGS.scheduleStartHour, 2);
+    assert.equal(DEFAULT_SETTINGS.scheduleEndHour, 6);
+  });
+
+  test('accepts a valid window', () => {
+    const s = validateSettings({ scheduleEnabled: true, scheduleStartHour: 22, scheduleEndHour: 6 });
+    assert.equal(s.scheduleEnabled, true);
+    assert.equal(s.scheduleStartHour, 22);
+  });
+
+  for (const bad of [
+    { scheduleStartHour: 24 },
+    { scheduleStartHour: -1 },
+    { scheduleEndHour: 6.5 },
+    { scheduleEnabled: 'yes' },
+    { scheduleEnabled: true, scheduleStartHour: 3, scheduleEndHour: 3 },
+  ]) {
+    test(`rejects ${JSON.stringify(bad)}`, () => {
+      assert.throws(() => validateSettings(bad), (err) => err.status === 400);
+    });
+  }
+
+  test('an equal start and end is allowed while scheduling is off', () => {
+    assert.doesNotThrow(() => validateSettings({ scheduleStartHour: 3, scheduleEndHour: 3 }));
   });
 });

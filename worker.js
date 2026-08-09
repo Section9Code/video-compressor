@@ -2,7 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-import { nextWaiting, updateJob } from './db.js';
+import { getSettings, nextWaiting, updateJob } from './db.js';
 import { buildEncodeArgs, createProgressParser, percentFrom, swapInPlace, verifyEncode } from './encode.js';
 import { probeAudioCodec as realProbeAudio, probeVideo as realProbeVideo } from './media.js';
 
@@ -146,26 +146,36 @@ export async function runJob(db, job, deps) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The window is [start, end) in server local time, and may wrap midnight.
+// Checked only before a job is picked up: an encode already running is never
+// interrupted by the window closing.
+export function withinSchedule(date, settings) {
+  if (!settings.scheduleEnabled) return true;
+  const hour = date.getHours();
+  const { scheduleStartHour: start, scheduleEndHour: end } = settings;
+  return start < end
+    ? hour >= start && hour < end
+    : hour >= start || hour < end;
+}
+
 export function startWorker(db, deps) {
-  const { idleMs = 2000 } = deps;
+  const { idleMs = 2000, now = Date.now } = deps;
   let stopped = false;
 
   (async () => {
     while (!stopped) {
+      // Read live rather than from the job snapshot: this is policy about when work
+      // may start, so a schedule change should take effect immediately.
+      if (!withinSchedule(new Date(now()), getSettings(db))) {
+        await sleep(idleMs);
+        continue;
+      }
       const job = nextWaiting(db);
       if (!job) {
         await sleep(idleMs);
         continue;
       }
-      try {
-        await runJob(db, job, deps);
-      } catch {
-        // ponytail: runJob is documented to always resolve; this is a last-resort
-        // net so a pathological rejection (e.g. the DB itself failing) can't crash
-        // the process or tight-loop retrying the same stuck row. Not a retry
-        // framework — just backs off like the idle case.
-        await sleep(idleMs);
-      }
+      await runJob(db, job, deps);
     }
   })();
 

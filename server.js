@@ -7,7 +7,7 @@ import {
   addJobs, deleteJob, getJob, getSettings, listJobs, open,
   putSettings, recoverProcessing, requeueJob,
 } from './db.js';
-import { cleanupTempFiles, startWorker } from './worker.js';
+import { cleanupTempFiles, startWorker, withinSchedule } from './worker.js';
 import { badRequest, listDirs, probeVideo, resolveSafe, scanTree, wouldReduce } from './media.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -71,6 +71,7 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
   });
 
   app.get('/api/jobs', (req, res) => {
+    const settings = getSettings(db);
     res.json({
       jobs: listJobs(db).map((job) => ({
         ...job,
@@ -80,6 +81,14 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
         trash_path: rel(job.trash_path),
         settings: JSON.parse(job.settings_json),
       })),
+      // Computed here, not in the browser: the server's clock is the one that
+      // actually gates the worker.
+      schedule: {
+        enabled: settings.scheduleEnabled,
+        startHour: settings.scheduleStartHour,
+        endHour: settings.scheduleEndHour,
+        open: withinSchedule(new Date(), settings),
+      },
     });
   });
 

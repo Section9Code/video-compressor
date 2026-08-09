@@ -123,6 +123,9 @@ export const DEFAULT_SETTINGS = {
   container: 'mp4',
   audioBitrate: '128k',
   vaapiDevice: '/dev/dri/renderD128',
+  scheduleEnabled: false,
+  scheduleStartHour: 2,
+  scheduleEndHour: 6,
 };
 
 export const TARGETS = [480, 540, 720, 1080, 1440];
@@ -151,6 +154,19 @@ export function validateSettings(input) {
   if (typeof s.vaapiDevice !== 'string' || !/^\/dev\/dri\/[A-Za-z0-9]+$/.test(s.vaapiDevice)) {
     throw badRequest('vaapiDevice must be a /dev/dri device path');
   }
+  if (typeof s.scheduleEnabled !== 'boolean') {
+    throw badRequest('scheduleEnabled must be true or false');
+  }
+  for (const key of ['scheduleStartHour', 'scheduleEndHour']) {
+    if (!Number.isInteger(s[key]) || s[key] < 0 || s[key] > 23) {
+      throw badRequest(`${key} must be an integer hour between 0 and 23`);
+    }
+  }
+  // Only meaningful when the schedule is on; an equal pair would otherwise be an
+  // empty window that silently stops the queue forever.
+  if (s.scheduleEnabled && s.scheduleStartHour === s.scheduleEndHour) {
+    throw badRequest('the schedule window start and end hours must differ');
+  }
 
   return {
     targetShortSide: s.targetShortSide,
@@ -159,6 +175,9 @@ export function validateSettings(input) {
     container: s.container,
     audioBitrate: s.audioBitrate,
     vaapiDevice: s.vaapiDevice,
+    scheduleEnabled: s.scheduleEnabled,
+    scheduleStartHour: s.scheduleStartHour,
+    scheduleEndHour: s.scheduleEndHour,
   };
 }
 
