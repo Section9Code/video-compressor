@@ -1600,9 +1600,11 @@ function fakeSpawn({ exitCode = 0, stdout = '', stderr = '', writesOutput = null
     const child = new EventEmitter();
     child.stdout = Readable.from([stdout]);
     child.stderr = Readable.from([stderr]);
-    setImmediate(() => {
-      child.stdout.on('end', () => setImmediate(() => child.emit('close', exitCode)));
-    });
+    // Attach 'end' synchronously: the stream stays paused until runFfmpeg adds its
+    // own 'data' listener, so this cannot fire early. Deferring the attach with
+    // setImmediate misses 'end' entirely, because Readable.from flushes on a
+    // nextTick chain that drains before the check phase — and the test then hangs.
+    child.stdout.on('end', () => setImmediate(() => child.emit('close', exitCode)));
     return child;
   };
   spawn.calls = calls;
