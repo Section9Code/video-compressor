@@ -1,0 +1,128 @@
+import express from 'express';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  addJobs, deleteJob, getJob, getSettings, listJobs, open,
+  putSettings, recoverProcessing, requeueJob,
+} from './db.js';
+import { cleanupTempFiles, startWorker } from './worker.js';
+import { badRequest, listDirs, probeVideo, resolveSafe, scanTree, wouldReduce } from './media.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }) {
+  const app = express();
+  app.use(express.json());
+
+  const rel = (abs) => (abs == null ? null : path.relative(mediaRoot, abs));
+
+  // Express 5 forwards a rejected promise to the error handler automatically.
+  app.get('/api/browse', async (req, res) => {
+    const abs = resolveSafe(mediaRoot, req.query.path ?? '');
+    const dirs = await listDirs(abs);
+    res.json({
+      path: rel(abs),
+      dirs: dirs.map((d) => ({ path: rel(d), name: path.basename(d) })),
+    });
+  });
+
+  app.get('/api/scan', async (req, res) => {
+    const abs = resolveSafe(mediaRoot, req.query.path ?? '');
+    const settings = getSettings(db);
+    const queued = new Set(listJobs(db).map((j) => j.path));
+    const found = await scan(abs, { probe });
+
+    res.json({
+      path: rel(abs),
+      files: found.map((f) => ({
+        path: rel(f.path),
+        name: path.basename(f.path),
+        size: f.size,
+        width: f.width,
+        height: f.height,
+        codec: f.codec,
+        duration: f.duration,
+        probeError: f.probeError,
+        wouldReduce: wouldReduce(f.width, f.height, settings.targetShortSide),
+        queued: queued.has(f.path),
+      })),
+    });
+  });
+
+  app.post('/api/jobs', async (req, res) => {
+    const paths = req.body?.paths;
+    if (!Array.isArray(paths)) {
+      return res.status(400).json({ error: 'paths must be an array' });
+    }
+
+    // Resolve and probe everything before inserting anything: a bad path in the
+    // list should reject the whole request rather than half-queue it.
+    const files = [];
+    for (const p of paths) {
+      const abs = resolveSafe(mediaRoot, p);
+      const info = await probe(abs).catch(() => null);
+      if (!info) throw badRequest(`no readable video stream: ${p}`);
+      const { size } = await fsp.stat(abs);
+      files.push({ path: abs, size, ...info });
+    }
+    res.json({ added: addJobs(db, files, getSettings(db)) });
+  });
+
+  app.get('/api/jobs', (req, res) => {
+    res.json({
+      jobs: listJobs(db).map((job) => ({
+        ...job,
+        path: rel(job.path),
+        name: path.basename(job.path),
+        final_path: rel(job.final_path),
+        trash_path: rel(job.trash_path),
+        settings: JSON.parse(job.settings_json),
+      })),
+    });
+  });
+
+  app.delete('/api/jobs/:id', (req, res) => {
+    const id = Number(req.params.id);
+    if (!getJob(db, id)) return res.status(404).json({ error: 'no such job' });
+    if (!deleteJob(db, id)) return res.status(409).json({ error: 'only a waiting job can be removed' });
+    res.json({ ok: true });
+  });
+
+  app.post('/api/jobs/:id/requeue', (req, res) => {
+    const id = Number(req.params.id);
+    if (!getJob(db, id)) return res.status(404).json({ error: 'no such job' });
+    if (!requeueJob(db, id)) return res.status(409).json({ error: 'only a failed or skipped job can be requeued' });
+    res.json({ ok: true });
+  });
+
+  app.get('/api/settings', (req, res) => res.json(getSettings(db)));
+  app.put('/api/settings', (req, res) => res.json(putSettings(db, req.body)));
+
+  app.use(express.static(path.join(HERE, 'public')));
+
+  app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    res.status(err.status ?? 500).json({ error: err.message });
+  });
+
+  return app;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const mediaRoot = process.env.MEDIA_ROOT ?? '/media';
+  const db = open(process.env.DB_PATH ?? '/data/queue.db');
+  const port = Number(process.env.PORT ?? 3000);
+
+  const recovered = recoverProcessing(db);
+  if (recovered.length) {
+    console.log(`recovered ${recovered.length} interrupted job(s)`);
+    await cleanupTempFiles(recovered);
+  }
+
+  startWorker(db, { mediaRoot });
+  createApp({ db, mediaRoot }).listen(port, () => {
+    console.log(`video-compressor on :${port}, media root ${mediaRoot}`);
+  });
+}

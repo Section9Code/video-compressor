@@ -865,3 +865,141 @@ describe('tempPathFor', () => {
     assert.equal(tempPathFor('/media/movies/a b.mkv', 'mp4'), '/media/movies/.a b.tmp.mp4');
   });
 });
+
+import { createApp } from './server.js';
+
+describe('http api', () => {
+  let root, db, server, base;
+
+  const files = () => [
+    { path: path.join(root, 'movies', 'big.mkv'), size: 4000, codec: 'h264', width: 1920, height: 1080, duration: 60, probeError: false },
+    { path: path.join(root, 'movies', 'small.mp4'), size: 100, codec: 'h264', width: 1280, height: 720, duration: 30, probeError: false },
+  ];
+
+  before(async () => {
+    root = fs.realpathSync(tmpdir('vc-api-'));
+    fs.mkdirSync(path.join(root, 'movies', 'action'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'movies', 'big.mkv'), 'x'.repeat(4000));
+    fs.writeFileSync(path.join(root, 'movies', 'small.mp4'), 'x'.repeat(100));
+
+    db = open(':memory:');
+    const app = createApp({
+      db,
+      mediaRoot: root,
+      scan: async () => files(),
+      probe: async () => ({ codec: 'h264', width: 1920, height: 1080, duration: 60 }),
+    });
+    server = app.listen(0);
+    await new Promise((r) => server.once('listening', r));
+    base = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  after(() => {
+    server.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const get = async (url) => {
+    const res = await fetch(base + url);
+    return { status: res.status, body: await res.json() };
+  };
+
+  const send = async (method, url, body) => {
+    const res = await fetch(base + url, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+
+  test('browse lists subdirectories as relative paths', async () => {
+    const { status, body } = await get('/api/browse?path=movies');
+    assert.equal(status, 200);
+    assert.deepEqual(body.dirs, [{ path: 'movies/action', name: 'action' }]);
+  });
+
+  test('browse defaults to the media root', async () => {
+    const { body } = await get('/api/browse');
+    assert.deepEqual(body.dirs.map((d) => d.name), ['movies']);
+  });
+
+  test('browse rejects traversal with 400', async () => {
+    const { status, body } = await get('/api/browse?path=../');
+    assert.equal(status, 400);
+    assert.match(body.error, /escapes media root/);
+  });
+
+  test('scan returns relative paths and flags what would shrink', async () => {
+    const { body } = await get('/api/scan?path=movies');
+    assert.deepEqual(body.files.map((f) => f.path), ['movies/big.mkv', 'movies/small.mp4']);
+    assert.equal(body.files[0].wouldReduce, true);
+    assert.equal(body.files[1].wouldReduce, false);
+    assert.equal(body.files[0].queued, false);
+  });
+
+  test('posting jobs enqueues them and scan then reports them as queued', async () => {
+    const added = await send('POST', '/api/jobs', { paths: ['movies/big.mkv'] });
+    assert.equal(added.status, 200);
+    assert.equal(added.body.added, 1);
+
+    const { body } = await get('/api/scan?path=movies');
+    assert.equal(body.files.find((f) => f.path === 'movies/big.mkv').queued, true);
+  });
+
+  test('jobs are returned with relative paths', async () => {
+    const { body } = await get('/api/jobs');
+    assert.equal(body.jobs.length, 1);
+    assert.equal(body.jobs[0].path, 'movies/big.mkv');
+    assert.equal(body.jobs[0].status, 'waiting');
+    assert.deepEqual(body.jobs[0].settings, DEFAULT_SETTINGS);
+  });
+
+  test('posting a path outside the root is rejected and enqueues nothing', async () => {
+    const { status } = await send('POST', '/api/jobs', { paths: ['../etc/passwd'] });
+    assert.equal(status, 400);
+    const { body } = await get('/api/jobs');
+    assert.equal(body.jobs.length, 1);
+  });
+
+  test('posting a non-array body is rejected', async () => {
+    assert.equal((await send('POST', '/api/jobs', { paths: 'movies/big.mkv' })).status, 400);
+  });
+
+  test('settings round-trip and reject bad values', async () => {
+    assert.deepEqual((await get('/api/settings')).body, DEFAULT_SETTINGS);
+    const put = await send('PUT', '/api/settings', { ...DEFAULT_SETTINGS, quality: 28 });
+    assert.equal(put.status, 200);
+    assert.equal(put.body.quality, 28);
+    assert.equal((await get('/api/settings')).body.quality, 28);
+    assert.equal((await send('PUT', '/api/settings', { quality: 99 })).status, 400);
+  });
+
+  test('a waiting job can be deleted, a processing one cannot', async () => {
+    const { body } = await get('/api/jobs');
+    const id = body.jobs[0].id;
+
+    updateJob(db, id, { status: 'processing' });
+    assert.equal((await send('DELETE', `/api/jobs/${id}`)).status, 409);
+
+    updateJob(db, id, { status: 'waiting' });
+    assert.equal((await send('DELETE', `/api/jobs/${id}`)).status, 200);
+    assert.equal((await get('/api/jobs')).body.jobs.length, 0);
+  });
+
+  test('a failed job can be requeued, a done one cannot', async () => {
+    await send('POST', '/api/jobs', { paths: ['movies/small.mp4'] });
+    const id = (await get('/api/jobs')).body.jobs[0].id;
+
+    updateJob(db, id, { status: 'failed', error: 'boom' });
+    assert.equal((await send('POST', `/api/jobs/${id}/requeue`)).status, 200);
+    assert.equal((await get('/api/jobs')).body.jobs[0].status, 'waiting');
+
+    updateJob(db, id, { status: 'done' });
+    assert.equal((await send('POST', `/api/jobs/${id}/requeue`)).status, 409);
+  });
+
+  test('an unknown job id is a 404', async () => {
+    assert.equal((await send('DELETE', '/api/jobs/9999')).status, 404);
+  });
+});
