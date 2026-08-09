@@ -219,3 +219,117 @@ describe('listDirs', () => {
     assert.deepEqual(dirs.map((d) => path.basename(d)).sort(), ['movies', 'tv']);
   });
 });
+
+import { open, addJobs, listJobs, getJob, nextWaiting, updateJob, deleteJob, requeueJob, recoverProcessing } from './db.js';
+
+const SAMPLE_SETTINGS = {
+  targetShortSide: 720, quality: 25, encoder: 'vaapi',
+  container: 'mp4', audioBitrate: '128k', vaapiDevice: '/dev/dri/renderD128',
+};
+
+const sampleFile = (p, over = {}) => ({
+  path: p, width: 1920, height: 1080, codec: 'h264', size: 1000, duration: 60, ...over,
+});
+
+describe('jobs table', () => {
+  test('addJobs inserts rows as waiting with a settings snapshot', () => {
+    const db = open(':memory:');
+    const n = addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    assert.equal(n, 1);
+
+    const [row] = listJobs(db);
+    assert.equal(row.path, '/media/a.mp4');
+    assert.equal(row.status, 'waiting');
+    assert.equal(row.progress, 0);
+    assert.equal(row.orig_size, 1000);
+    assert.deepEqual(JSON.parse(row.settings_json), SAMPLE_SETTINGS);
+    assert.ok(row.created_at > 0);
+  });
+
+  test('addJobs ignores a path that is already queued', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    const n = addJobs(db, [sampleFile('/media/a.mp4'), sampleFile('/media/b.mp4')], SAMPLE_SETTINGS);
+    assert.equal(n, 1);
+    assert.equal(listJobs(db).length, 2);
+  });
+
+  test('a settings change does not touch already-queued jobs', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    addJobs(db, [sampleFile('/media/b.mp4')], { ...SAMPLE_SETTINGS, quality: 30 });
+    const [a, b] = listJobs(db);
+    assert.equal(JSON.parse(a.settings_json).quality, 25);
+    assert.equal(JSON.parse(b.settings_json).quality, 30);
+  });
+
+  test('nextWaiting returns the lowest waiting id and skips other statuses', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4'), sampleFile('/media/b.mp4')], SAMPLE_SETTINGS);
+    const first = nextWaiting(db);
+    assert.equal(first.path, '/media/a.mp4');
+
+    updateJob(db, first.id, { status: 'done' });
+    assert.equal(nextWaiting(db).path, '/media/b.mp4');
+
+    updateJob(db, 2, { status: 'failed' });
+    assert.equal(nextWaiting(db), undefined);
+  });
+
+  test('updateJob writes whitelisted columns and ignores unknown keys', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    updateJob(db, 1, { status: 'done', new_size: 400, progress: 100, nonsense: 1 });
+    const row = getJob(db, 1);
+    assert.equal(row.status, 'done');
+    assert.equal(row.new_size, 400);
+    assert.equal(row.progress, 100);
+  });
+
+  test('updateJob refuses a column name that is not whitelisted', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    updateJob(db, 1, { 'path = "hacked", status': 'x' });
+    assert.equal(getJob(db, 1).path, '/media/a.mp4');
+  });
+
+  test('deleteJob removes a waiting job and refuses any other status', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    updateJob(db, 1, { status: 'processing' });
+    assert.equal(deleteJob(db, 1), false);
+    updateJob(db, 1, { status: 'waiting' });
+    assert.equal(deleteJob(db, 1), true);
+    assert.equal(listJobs(db).length, 0);
+  });
+
+  test('requeueJob resets failed and skipped rows and clears their result fields', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    updateJob(db, 1, { status: 'failed', error: 'boom', new_size: 999, progress: 40 });
+
+    assert.equal(requeueJob(db, 1), true);
+    const row = getJob(db, 1);
+    assert.equal(row.status, 'waiting');
+    assert.equal(row.error, null);
+    assert.equal(row.new_size, null);
+    assert.equal(row.progress, 0);
+
+    assert.equal(requeueJob(db, 1), false, 'a waiting job cannot be requeued');
+  });
+
+  test('recoverProcessing resets interrupted jobs and reports them', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4'), sampleFile('/media/b.mp4')], SAMPLE_SETTINGS);
+    updateJob(db, 1, { status: 'processing', progress: 55 });
+
+    const recovered = recoverProcessing(db);
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0].path, '/media/a.mp4');
+
+    const row = getJob(db, 1);
+    assert.equal(row.status, 'waiting');
+    assert.equal(row.progress, 0);
+    assert.equal(recoverProcessing(db).length, 0);
+  });
+});
