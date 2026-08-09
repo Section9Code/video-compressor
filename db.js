@@ -38,10 +38,21 @@ const WRITABLE = new Set([
   'final_path', 'trash_path', 'error', 'finished_at', 'started_at',
 ]);
 
+// Columns added to `jobs` after its initial release. CREATE TABLE IF NOT EXISTS is a
+// no-op against an existing table that predates a column, so an upgrade needs an
+// explicit ALTER TABLE too — this is the only place a future column needs adding.
+const ADDED_COLUMNS = { started_at: 'INTEGER' };
+
 export function open(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL');
   db.exec(SCHEMA);
+
+  const existing = new Set(db.prepare('PRAGMA table_info(jobs)').all().map((c) => c.name));
+  for (const [name, type] of Object.entries(ADDED_COLUMNS)) {
+    if (!existing.has(name)) db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${type}`);
+  }
+
   return db;
 }
 

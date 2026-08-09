@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { resolveSafe } from './media.js';
 
@@ -331,6 +332,43 @@ describe('jobs table', () => {
     assert.equal(row.status, 'waiting');
     assert.equal(row.progress, 0);
     assert.equal(recoverProcessing(db).length, 0);
+  });
+
+  test('open adds started_at to a jobs table created before the column existed', () => {
+    // CREATE TABLE IF NOT EXISTS is a no-op against a pre-existing table, so this
+    // starts from the old shape directly rather than going through open().
+    const dbFile = path.join(tmpdir('vc-migrate-'), 'queue.db');
+    const raw = new DatabaseSync(dbFile);
+    raw.exec(`
+      CREATE TABLE jobs (
+        id            INTEGER PRIMARY KEY,
+        path          TEXT    NOT NULL UNIQUE,
+        status        TEXT    NOT NULL,
+        width         INTEGER,
+        height        INTEGER,
+        codec         TEXT,
+        orig_size     INTEGER,
+        new_size      INTEGER,
+        duration      REAL,
+        progress      INTEGER NOT NULL DEFAULT 0,
+        bitrate       TEXT,
+        final_path    TEXT,
+        trash_path    TEXT,
+        settings_json TEXT    NOT NULL,
+        error         TEXT,
+        created_at    INTEGER NOT NULL,
+        finished_at   INTEGER
+      )
+    `);
+    raw.close();
+
+    const db = open(dbFile);
+    const cols = db.prepare('PRAGMA table_info(jobs)').all().map((c) => c.name);
+    assert.ok(cols.includes('started_at'), 'started_at must be added to a pre-existing jobs table');
+
+    addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    updateJob(db, 1, { started_at: 12345 });
+    assert.equal(getJob(db, 1).started_at, 12345, 'a write to the newly-added column must succeed');
   });
 });
 
