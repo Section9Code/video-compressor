@@ -195,6 +195,39 @@ describe('scanTree', () => {
     assert.equal(found.find((f) => f.path.endsWith('small.mp4')).probeError, true);
   });
 
+  test('drops a file that vanishes mid-scan instead of failing the scan', async () => {
+    const dir = fs.realpathSync(tmpdir('vc-vanish-'));
+    fs.writeFileSync(path.join(dir, 'a.mp4'), 'aa');
+    fs.writeFileSync(path.join(dir, 'b.mp4'), 'bb');
+
+    // Serial, so a.mp4 is always handled first: the worker trashing b.mp4 while the
+    // scan is walking the same tree is a normal event, not an anomaly.
+    const probe = async (file) => {
+      if (file.endsWith('a.mp4')) fs.unlinkSync(path.join(dir, 'b.mp4'));
+      return { codec: 'h264', width: 1280, height: 720, duration: 30 };
+    };
+
+    const found = await scanTree(dir, { probe, concurrency: 1 });
+    assert.deepEqual(found.map((f) => path.basename(f.path)), ['a.mp4']);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('skips an unreadable subdirectory instead of failing the scan', { skip: process.getuid?.() === 0 && 'root reads anything' }, async () => {
+    const dir = fs.realpathSync(tmpdir('vc-eacces-'));
+    fs.writeFileSync(path.join(dir, 'a.mp4'), 'aa');
+    fs.mkdirSync(path.join(dir, 'locked'));
+    fs.writeFileSync(path.join(dir, 'locked', 'b.mp4'), 'bb');
+    fs.chmodSync(path.join(dir, 'locked'), 0o000);
+
+    try {
+      const found = await scanTree(dir, { probe: fakeProbe });
+      assert.deepEqual(found.map((f) => path.basename(f.path)), ['a.mp4']);
+    } finally {
+      fs.chmodSync(path.join(dir, 'locked'), 0o700);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('covers every documented extension', () => {
     for (const ext of ['mkv', 'mp4', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', 'ts', 'm2ts', 'webm']) {
       assert.ok(VIDEO_EXTENSIONS.includes(ext), `missing ${ext}`);
@@ -254,6 +287,48 @@ describe('jobs table', () => {
     assert.equal(n, 1);
     assert.equal(listJobs(db).length, 2);
   });
+
+  test('addJobs re-queues a done path with fresh metadata and settings', () => {
+    const db = open(':memory:');
+    addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+    updateJob(db, 1, {
+      status: 'done', progress: 100, new_size: 400, error: null,
+      final_path: '/media/a.mp4', trash_path: '/media/.trash/a.mp4', finished_at: 1,
+    });
+
+    const n = addJobs(db, [sampleFile('/media/a.mp4', { size: 400, width: 1280, height: 720 })],
+      { ...SAMPLE_SETTINGS, targetShortSide: 540 });
+
+    assert.equal(n, 1, 'a re-queued path must not report added: 0');
+    assert.equal(listJobs(db).length, 1, 'the row is recycled, not duplicated');
+    const row = getJob(db, 1);
+    assert.equal(row.status, 'waiting');
+    assert.equal(row.orig_size, 400);
+    assert.equal(row.width, 1280);
+    assert.equal(row.progress, 0);
+    assert.equal(row.new_size, null);
+    assert.equal(row.final_path, null);
+    assert.equal(row.trash_path, null);
+    assert.equal(row.finished_at, null);
+    assert.equal(JSON.parse(row.settings_json).targetShortSide, 540);
+  });
+
+  for (const status of ['waiting', 'processing', 'skipped', 'failed']) {
+    test(`addJobs leaves a ${status} row alone`, () => {
+      const db = open(':memory:');
+      addJobs(db, [sampleFile('/media/a.mp4')], SAMPLE_SETTINGS);
+      updateJob(db, 1, { status, error: 'kept' });
+
+      const n = addJobs(db, [sampleFile('/media/a.mp4', { size: 9 })], { ...SAMPLE_SETTINGS, quality: 30 });
+
+      assert.equal(n, 0);
+      const row = getJob(db, 1);
+      assert.equal(row.status, status);
+      assert.equal(row.orig_size, 1000);
+      assert.equal(row.error, 'kept');
+      assert.equal(JSON.parse(row.settings_json).quality, 25);
+    });
+  }
 
   test('a settings change does not touch already-queued jobs', () => {
     const db = open(':memory:');
@@ -686,6 +761,44 @@ describe('swapInPlace', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  test('refuses to overwrite a file that already exists at the destination', async () => {
+    setup();
+    const src = path.join(root, 'movies', 'clip.mov');
+    const tmp = path.join(root, 'movies', '.clip.tmp.mp4');
+    const final = path.join(root, 'movies', 'clip.mp4');
+    fs.writeFileSync(src, 'original mov');
+    fs.writeFileSync(final, 'a different video that must survive');
+    fs.writeFileSync(tmp, 'new');
+
+    await assert.rejects(
+      swapInPlace({ src, tmp, final, mediaRoot: root }),
+      (err) => {
+        assert.match(err.message, /refusing to overwrite/);
+        assert.ok(err.message.includes('movies/clip.mp4'), 'names the collision');
+        return true;
+      },
+    );
+
+    assert.equal(fs.readFileSync(src, 'utf8'), 'original mov', 'original untouched');
+    assert.equal(fs.readFileSync(final, 'utf8'), 'a different video that must survive');
+    assert.equal(fs.existsSync(path.join(root, '.trash')), false, 'nothing was moved');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('replaces the source in place when the container does not change', async () => {
+    setup();
+    const src = path.join(root, 'movies', 'clip.mp4');
+    const tmp = path.join(root, 'movies', '.clip.tmp.mp4');
+    fs.writeFileSync(src, 'original');
+    fs.writeFileSync(tmp, 'new');
+
+    const trashPath = await swapInPlace({ src, tmp, final: src, mediaRoot: root });
+
+    assert.equal(fs.readFileSync(src, 'utf8'), 'new');
+    assert.equal(fs.readFileSync(trashPath, 'utf8'), 'original');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   test('restores the original when moving the temp file into place fails', async () => {
     setup();
     const src = path.join(root, 'movies', 'a.mkv');
@@ -878,6 +991,23 @@ describe('runJob', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  test('a file already sitting at the destination fails the job, harming neither file', async () => {
+    const { db, src, job } = prepare();
+    const collision = path.join(root, 'movies', 'clip.mp4');
+    fs.writeFileSync(collision, 'an unrelated video');
+
+    await runJob(db, job, deps({ spawn: fakeSpawn({ writesOutput: 'small' }) }));
+
+    const row = getJob(db, job.id);
+    assert.equal(row.status, 'failed');
+    assert.match(row.error, /refusing to overwrite/);
+    assert.equal(fs.readFileSync(src, 'utf8'), 'x'.repeat(1000), 'original untouched');
+    assert.equal(fs.readFileSync(collision, 'utf8'), 'an unrelated video', 'collision untouched');
+    assert.equal(fs.existsSync(tempPathFor(src, 'mp4')), false, 'temp file cleaned up');
+    assert.equal(fs.existsSync(path.join(root, '.trash')), false, 'nothing reached trash');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   test('a source that vanished before its turn fails cleanly', async () => {
     const { db, src, job } = prepare();
     fs.unlinkSync(src);
@@ -914,7 +1044,7 @@ describe('tempPathFor', () => {
   });
 });
 
-import { createApp } from './server.js';
+import { createApp, mediaRootFromEnv } from './server.js';
 
 describe('http api', () => {
   let root, db, server, base;
@@ -1076,6 +1206,41 @@ describe('http api', () => {
 
     await send('PUT', '/api/settings', DEFAULT_SETTINGS);
     assert.equal((await get('/api/jobs')).body.schedule.open, true, 'always open when disabled');
+  });
+
+  test('a done path can be queued again; skipped and failed still block', async () => {
+    await send('POST', '/api/jobs', { paths: ['movies/big.mkv'] });
+    const idOf = async (p) => (await get('/api/jobs')).body.jobs.find((j) => j.path === p);
+    updateJob(db, (await idOf('movies/big.mkv')).id, { status: 'done', new_size: 400, finished_at: 1 });
+    updateJob(db, (await idOf('movies/small.mp4')).id, { status: 'skipped', error: 'not smaller' });
+
+    const { body } = await get('/api/scan?path=movies');
+    assert.equal(body.files.find((f) => f.path === 'movies/big.mkv').queued, false,
+      'a done file must not be locked out of the browser forever');
+    assert.equal(body.files.find((f) => f.path === 'movies/small.mp4').queued, true,
+      'skipped is still the SKIP_LIST');
+
+    const again = await send('POST', '/api/jobs', { paths: ['movies/big.mkv'] });
+    assert.equal(again.body.added, 1, 'no phantom added: 0 for a path the user just ticked');
+    assert.equal((await idOf('movies/big.mkv')).status, 'waiting');
+  });
+});
+
+describe('mediaRootFromEnv', () => {
+  test('realpaths MEDIA_ROOT, so a symlinked root still agrees with resolveSafe', () => {
+    const real = fs.realpathSync(tmpdir('vc-real-'));
+    const link = path.join(fs.realpathSync(tmpdir('vc-link-')), 'videos');
+    fs.symlinkSync(real, link);
+    fs.mkdirSync(path.join(real, 'movies'));
+
+    const mediaRoot = mediaRootFromEnv({ MEDIA_ROOT: link });
+    assert.equal(mediaRoot, real);
+    // The raw env value would make this '../<real>/movies', which neither
+    // round-trips through resolveSafe nor keeps the trash path inside .trash.
+    assert.equal(path.relative(mediaRoot, resolveSafe(link, 'movies')), 'movies');
+
+    fs.rmSync(real, { recursive: true, force: true });
+    fs.rmSync(path.dirname(link), { recursive: true, force: true });
   });
 });
 

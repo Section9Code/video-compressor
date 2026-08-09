@@ -119,21 +119,29 @@ async function moveFile(from, to) {
   }
 }
 
+const exists = (file) => fsp.access(file).then(() => true, () => false);
+
 async function uniquePath(target) {
   let candidate = target;
-  for (let n = 1; ; n++) {
-    try {
-      await fsp.access(candidate);
-    } catch {
-      return candidate;
-    }
-    candidate = `${target}.${n}`;
-  }
+  for (let n = 1; await exists(candidate); n++) candidate = `${target}.${n}`;
+  return candidate;
 }
 
 // The original goes to trash before the new file lands, because a container change
 // means the two have different names and would otherwise both exist.
 export async function swapInPlace({ src, tmp, final, mediaRoot }) {
+  // rename() overwrites its destination silently. When the container changes,
+  // `final` is a different name that may already hold a video of its own —
+  // clip.mov encoding to clip.mp4 in a directory that already has clip.mp4.
+  // Abort rather than invent clip.mp4.1: a failed job the user can act on beats
+  // a surprise rename. Checked before the first move, so the original is untouched.
+  if (final !== src && await exists(final)) {
+    throw new Error(
+      `refusing to overwrite the existing file ${path.relative(mediaRoot, final)}; `
+      + 'move or rename it, then retry this job',
+    );
+  }
+
   const trashTarget = path.join(mediaRoot, '.trash', path.relative(mediaRoot, src));
   await fsp.mkdir(path.dirname(trashTarget), { recursive: true });
   const trashPath = await uniquePath(trashTarget);

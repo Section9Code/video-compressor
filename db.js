@@ -59,10 +59,25 @@ export function open(file) {
 export function addJobs(db, files, settings) {
   const snapshot = JSON.stringify(settings);
   const now = Date.now();
+  // `path UNIQUE` is the SKIP_LIST replacement: a waiting/processing/skipped/failed
+  // row keeps its path out of the queue, and skipped/failed have RETRY. A `done`
+  // row must not, though — when the container matches the source extension the
+  // finished file inherits that path, and lowering the target later has to be able
+  // to queue it again. So a conflict with a done row recycles the row (same shape
+  // as RETRY) with freshly probed metadata; any other status still no-ops, and the
+  // DO UPDATE reports changes=1 so the caller never sees a phantom `added: 0`.
   const stmt = db.prepare(`
-    INSERT OR IGNORE INTO jobs
+    INSERT INTO jobs
       (path, status, width, height, codec, orig_size, duration, settings_json, created_at)
     VALUES (?, 'waiting', ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (path) DO UPDATE SET
+      status = 'waiting',
+      width = excluded.width, height = excluded.height, codec = excluded.codec,
+      orig_size = excluded.orig_size, duration = excluded.duration,
+      settings_json = excluded.settings_json, created_at = excluded.created_at,
+      progress = 0, bitrate = NULL, new_size = NULL, final_path = NULL,
+      trash_path = NULL, error = NULL, finished_at = NULL, started_at = NULL
+    WHERE jobs.status = 'done'
   `);
 
   let inserted = 0;

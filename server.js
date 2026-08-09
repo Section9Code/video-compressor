@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +15,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }) {
   const app = express();
-  app.use(express.json());
+  // The spec anticipates trees of a few thousand files, and POST /api/jobs sends one
+  // relative path per selected file — well past express's 100kb default.
+  app.use(express.json({ limit: '5mb' }));
 
   const rel = (abs) => (abs == null ? null : path.relative(mediaRoot, abs));
 
@@ -31,7 +34,10 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
   app.get('/api/scan', async (req, res) => {
     const abs = resolveSafe(mediaRoot, req.query.path ?? '');
     const settings = getSettings(db);
-    const queued = new Set(listJobs(db).map((j) => j.path));
+    // `done` is deliberately not "queued": that file is finished, and re-queueing it
+    // at a lower target is a legitimate thing to want. skipped/failed still block,
+    // since those rows are the SKIP_LIST and carry their own RETRY action.
+    const queued = new Set(listJobs(db).filter((j) => j.status !== 'done').map((j) => j.path));
     const found = await scan(abs, { probe });
 
     res.json({
@@ -121,8 +127,15 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
   return app;
 }
 
+// resolveSafe realpaths internally, so mediaRoot has to be a realpath too or every
+// path it returns is relative to the wrong root: rel() would emit ../mnt/... and
+// swapInPlace's trash path would land outside .trash.
+export function mediaRootFromEnv(env = process.env) {
+  return fs.realpathSync(env.MEDIA_ROOT ?? '/media');
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const mediaRoot = process.env.MEDIA_ROOT ?? '/media';
+  const mediaRoot = mediaRootFromEnv();
   const db = open(process.env.DB_PATH ?? '/data/queue.db');
   const port = Number(process.env.PORT ?? 3000);
 

@@ -102,7 +102,14 @@ export async function listDirs(absDir) {
 }
 
 async function walk(dir, out) {
-  const entries = await fsp.readdir(dir, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    // Unreadable (EACCES) or gone (ENOENT, the worker moving files into .trash
+    // mid-scan): skip the directory rather than 500 the whole listing.
+    return;
+  }
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -134,8 +141,11 @@ export async function scanTree(absDir, { probe = probeVideo, concurrency = 4 } =
   await walk(absDir, files);
   files.sort();
 
-  return pool(files, concurrency, async (file) => {
-    const size = (await fsp.stat(file)).size;
+  const scanned = await pool(files, concurrency, async (file) => {
+    // A file the worker trashed between the walk and here drops out of the
+    // results; one vanished file must not reject the whole scan.
+    const size = await fsp.stat(file).then((s) => s.size, () => null);
+    if (size === null) return null;
     let info = null;
     try {
       info = await probe(file);
@@ -152,4 +162,6 @@ export async function scanTree(absDir, { probe = probeVideo, concurrency = 4 } =
       probeError: info === null,
     };
   });
+
+  return scanned.filter(Boolean);
 }
