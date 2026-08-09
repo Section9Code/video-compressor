@@ -9,11 +9,17 @@ function app() {
     files: [],
     selected: new Set(),
     jobs: [],
+    error: null,
 
     async boot() {
       this.$watch('view', (v) => { location.hash = `#/${v}`; });
-      this.settings = await this.json('/api/settings');
-      this.tree = await this.loadDirs('', 0);
+      this.error = null;
+      try {
+        this.settings = await this.json('/api/settings');
+        this.tree = await this.loadDirs('', 0);
+      } catch (err) {
+        this.error = err.message;
+      }
       this.poll();
       setInterval(() => { if (!document.hidden) this.poll(); }, 2000);
     },
@@ -32,21 +38,36 @@ function app() {
 
     // Lazily expand in place, so a deep tree is never walked up front.
     async scanDir(p) {
+      this.error = null;
       const i = this.tree.findIndex((n) => n.path === p);
       const node = this.tree[i];
       if (node && !node.open) {
-        const children = await this.loadDirs(p, node.depth + 1);
+        // Flip open synchronously before the await: a second click on the same
+        // node while this request is in flight then sees open === true and is
+        // a no-op, instead of racing a duplicate splice at a stale index.
         node.open = true;
-        this.tree.splice(i + 1, 0, ...children);
+        try {
+          const children = await this.loadDirs(p, node.depth + 1);
+          this.tree.splice(i + 1, 0, ...children);
+        } catch (err) {
+          node.open = false;
+          this.error = err.message;
+          return;
+        }
       }
 
-      this.scanPath = p;
       this.scanning = true;
-      this.selected = new Set();
       try {
         const { files } = await this.json(`/api/scan?path=${encodeURIComponent(p)}`);
+        // Only commit path/files/selection once the scan succeeds, so a failed
+        // scan doesn't leave the breadcrumb and the file list describing
+        // different directories.
+        this.scanPath = p;
         this.files = files;
+        this.selected = new Set();
         this.selectAllReducible();
+      } catch (err) {
+        this.error = err.message;
       } finally {
         this.scanning = false;
       }
@@ -81,15 +102,20 @@ function app() {
     },
 
     async addSelected() {
-      await this.json('/api/jobs', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ paths: [...this.selected] }),
-      });
-      this.selected = new Set();
-      await this.scanDir(this.scanPath);
-      this.view = 'queue';
-      this.poll();
+      this.error = null;
+      try {
+        await this.json('/api/jobs', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ paths: [...this.selected] }),
+        });
+        this.selected = new Set();
+        await this.scanDir(this.scanPath);
+        this.view = 'queue';
+        this.poll();
+      } catch (err) {
+        this.error = err.message;
+      }
     },
 
     async poll() {

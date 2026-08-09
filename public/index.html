@@ -16,6 +16,7 @@
   <aside class="w-[280px] shrink-0 border-r border-outline-variant bg-surface-container-lowest p-6 flex flex-col">
     <h1 class="font-mono text-lg font-bold tracking-[0.1em] text-accent">VIDEO_<wbr>COMPRESSOR</h1>
     <p class="mt-1 font-mono text-xs tracking-[0.1em] text-on-surface-variant">[ HEVC_PIPELINE ]</p>
+    <p x-show="error" class="mt-4 pill text-error" x-text="`[ ERROR: ${error} ]`"></p>
 
     <nav class="mt-10 flex flex-col gap-1">
       <button @click="view = 'browse'" class="px-4 py-3 text-left font-mono text-sm tracking-[0.05em] border-l-2"
@@ -74,7 +75,7 @@
           <button @click="selectAllReducible()" class="font-mono text-xs tracking-[0.1em] text-on-surface-variant hover:text-accent">
             SELECT_ALL_REDUCIBLE
           </button>
-          <button @click="selected = new Set(); files = files" class="font-mono text-xs tracking-[0.1em] text-on-surface-variant hover:text-accent">
+          <button @click="selected = new Set()" class="font-mono text-xs tracking-[0.1em] text-on-surface-variant hover:text-accent">
             CLEAR
           </button>
           <span class="ml-auto font-mono text-xs text-outline" x-text="scanning ? '[ SCANNING... ]' : `[ ${files.length} FILES ]`"></span>
