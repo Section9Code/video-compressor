@@ -401,3 +401,93 @@ describe('settings', () => {
     }
   });
 });
+
+import { buildEncodeArgs } from './encode.js';
+
+describe('buildEncodeArgs', () => {
+  const base = {
+    src: '/media/in put.mkv',
+    tmp: '/media/.in put.tmp.mp4',
+    width: 1920,
+    height: 1080,
+    audioCodec: 'ac3',
+    settings: SAMPLE_SETTINGS,
+  };
+
+  // Find the value that follows a flag, so assertions do not depend on argument order.
+  const after = (args, flag) => args[args.indexOf(flag) + 1];
+
+  test('vaapi: hardware device, scale filter and CQP quality', () => {
+    const args = buildEncodeArgs(base);
+    assert.equal(after(args, '-vaapi_device'), '/dev/dri/renderD128');
+    assert.equal(after(args, '-vf'), 'format=nv12,hwupload,scale_vaapi=w=1280:h=720');
+    assert.equal(after(args, '-c:v'), 'hevc_vaapi');
+    assert.equal(after(args, '-rc_mode'), 'CQP');
+    assert.equal(after(args, '-qp'), '25');
+  });
+
+  test('qsv: hardware init, vpp filter and global_quality', () => {
+    const args = buildEncodeArgs({ ...base, settings: { ...SAMPLE_SETTINGS, encoder: 'qsv' } });
+    assert.ok(args.includes('-init_hw_device'));
+    assert.equal(after(args, '-vf'), 'format=nv12,hwupload=extra_hw_frames=64,vpp_qsv=w=1280:h=720');
+    assert.equal(after(args, '-c:v'), 'hevc_qsv');
+    assert.equal(after(args, '-global_quality'), '25');
+  });
+
+  test('software: plain scale, libx265 and crf', () => {
+    const args = buildEncodeArgs({ ...base, settings: { ...SAMPLE_SETTINGS, encoder: 'software' } });
+    assert.ok(!args.includes('-vaapi_device'));
+    assert.equal(after(args, '-vf'), 'scale=1280:720');
+    assert.equal(after(args, '-c:v'), 'libx265');
+    assert.equal(after(args, '-crf'), '25');
+  });
+
+  test('audio is copied when the source is already aac', () => {
+    const args = buildEncodeArgs({ ...base, audioCodec: 'aac' });
+    assert.equal(after(args, '-c:a'), 'copy');
+    assert.ok(!args.includes('-b:a'));
+  });
+
+  test('audio is transcoded to stereo aac otherwise', () => {
+    const args = buildEncodeArgs(base);
+    assert.equal(after(args, '-c:a'), 'aac');
+    assert.equal(after(args, '-b:a'), '128k');
+    assert.equal(after(args, '-ac'), '2');
+  });
+
+  test('mp4 drops subtitles, tags hvc1 and enables faststart', () => {
+    const args = buildEncodeArgs(base);
+    assert.ok(args.includes('-sn'));
+    assert.equal(after(args, '-movflags'), '+faststart');
+    assert.equal(after(args, '-tag:v'), 'hvc1');
+    assert.ok(args.includes('0:a?'));
+  });
+
+  test('mkv keeps every stream and copies subtitles', () => {
+    const args = buildEncodeArgs({
+      ...base,
+      tmp: '/media/.in put.tmp.mkv',
+      settings: { ...SAMPLE_SETTINGS, container: 'mkv' },
+    });
+    assert.equal(after(args, '-map'), '0');
+    assert.equal(after(args, '-c:s'), 'copy');
+    assert.ok(!args.includes('-sn'));
+  });
+
+  test('progress reporting is enabled on stdout', () => {
+    const args = buildEncodeArgs(base);
+    assert.equal(after(args, '-progress'), 'pipe:1');
+    assert.ok(args.includes('-nostats'));
+  });
+
+  test('portrait sources scale by width', () => {
+    const args = buildEncodeArgs({ ...base, width: 1080, height: 1920 });
+    assert.equal(after(args, '-vf'), 'format=nv12,hwupload,scale_vaapi=w=720:h=1280');
+  });
+
+  test('the input and output are passed as single unquoted array elements', () => {
+    const args = buildEncodeArgs(base);
+    assert.equal(after(args, '-i'), '/media/in put.mkv');
+    assert.equal(args.at(-1), '/media/.in put.tmp.mp4');
+  });
+});
