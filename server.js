@@ -104,7 +104,9 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
 
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
-    res.status(err.status ?? 500).json({ error: err.message });
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error(`${req.method} ${req.originalUrl}:`, err);
+    res.status(500).json({ error: 'internal server error' });
   });
 
   return app;

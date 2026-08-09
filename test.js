@@ -1002,4 +1002,17 @@ describe('http api', () => {
   test('an unknown job id is a 404', async () => {
     assert.equal((await send('DELETE', '/api/jobs/9999')).status, 404);
   });
+
+  test('a downstream fs error is a generic 500 that does not leak the absolute path', async () => {
+    const { status, body } = await get('/api/browse?path=movies/big.mkv');
+    assert.equal(status, 500);
+    assert.ok(!JSON.stringify(body).includes(root), 'response must not contain the media root absolute path');
+  });
+
+  test('posting jobs is all-or-nothing: one bad path rejects the whole batch', async () => {
+    const before = (await get('/api/jobs')).body.jobs.length;
+    const { status } = await send('POST', '/api/jobs', { paths: ['movies/small.mp4', '../etc/passwd'] });
+    assert.equal(status, 400);
+    assert.equal((await get('/api/jobs')).body.jobs.length, before);
+  });
 });
