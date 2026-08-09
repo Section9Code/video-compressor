@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIDEO_COMPRESSOR</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
+<script defer src="/alpine.js"></script>
+</head>
+<body class="min-h-screen" x-data="app()" x-init="boot()">
+
+<div class="flex min-h-screen">
+
+  <!-- SIDEBAR -->
+  <aside class="w-[280px] shrink-0 border-r border-outline-variant bg-surface-container-lowest p-6 flex flex-col">
+    <h1 class="font-mono text-lg font-bold tracking-[0.1em] text-accent">VIDEO_<wbr>COMPRESSOR</h1>
+    <p class="mt-1 font-mono text-xs tracking-[0.1em] text-on-surface-variant">[ HEVC_PIPELINE ]</p>
+
+    <nav class="mt-10 flex flex-col gap-1">
+      <button @click="view = 'browse'" class="px-4 py-3 text-left font-mono text-sm tracking-[0.05em] border-l-2"
+              :class="view === 'browse' ? 'border-accent text-accent bg-surface-container' : 'border-transparent text-on-surface-variant hover:text-on-surface'">
+        FILE_TERMINAL
+      </button>
+      <button @click="view = 'queue'" class="px-4 py-3 text-left font-mono text-sm tracking-[0.05em] border-l-2"
+              :class="view === 'queue' ? 'border-accent text-accent bg-surface-container' : 'border-transparent text-on-surface-variant hover:text-on-surface'">
+        DATA_PROCESSOR
+        <span x-show="activeCount" class="ml-2 pill text-toxic" x-text="activeCount"></span>
+      </button>
+    </nav>
+
+    <div class="mt-auto">
+      <button @click="settingsOpen = true"
+              class="w-full border border-accent px-4 py-3 font-mono text-sm tracking-[0.1em] text-accent hover:glow">
+        ENCODE_PARAMS
+      </button>
+      <p class="mt-4 font-mono text-xs text-outline" x-text="`ENCODER: ${settings.encoder?.toUpperCase() ?? '...'}`"></p>
+      <p class="font-mono text-xs text-outline" x-text="`TARGET: ${settings.targetShortSide ?? '...'}P / QP ${settings.quality ?? '..'}`"></p>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="flex-1 min-w-0">
+
+    <!-- ================= BROWSE ================= -->
+    <section x-show="view === 'browse'" class="flex h-screen">
+
+      <!-- tree -->
+      <div class="w-[320px] shrink-0 overflow-y-auto border-r border-outline-variant p-4">
+        <p class="mb-4 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">SERVER_TREE</p>
+        <template x-for="node in tree" :key="node.path">
+          <button @click="scanDir(node.path)"
+                  class="block w-full truncate px-2 py-2 text-left font-mono text-sm"
+                  :style="`padding-left: ${node.depth * 14 + 8}px`"
+                  :class="scanPath === node.path ? 'bg-surface-container text-accent border-l-2 border-accent' : 'text-on-surface-variant hover:text-on-surface'">
+            <span x-text="node.open ? '▾' : '▸'" class="mr-1 text-outline"></span>
+            <span x-text="node.name"></span>
+          </button>
+        </template>
+      </div>
+
+      <!-- files -->
+      <div class="flex min-w-0 flex-1 flex-col">
+        <div class="border-b border-outline-variant px-6 py-4">
+          <p class="font-mono text-sm text-on-surface-variant">
+            <span class="text-outline">ROOT</span>
+            <template x-for="crumb in breadcrumbs" :key="crumb">
+              <span><span class="mx-2 text-outline">/</span><span class="text-accent" x-text="crumb"></span></span>
+            </template>
+          </p>
+        </div>
+
+        <div class="flex items-center gap-4 border-b border-outline-variant px-6 py-3">
+          <button @click="selectAllReducible()" class="font-mono text-xs tracking-[0.1em] text-on-surface-variant hover:text-accent">
+            SELECT_ALL_REDUCIBLE
+          </button>
+          <button @click="selected = new Set(); files = files" class="font-mono text-xs tracking-[0.1em] text-on-surface-variant hover:text-accent">
+            CLEAR
+          </button>
+          <span class="ml-auto font-mono text-xs text-outline" x-text="scanning ? '[ SCANNING... ]' : `[ ${files.length} FILES ]`"></span>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-6">
+          <p x-show="!scanning && !files.length" class="font-mono text-sm text-outline">
+            [ SELECT A DIRECTORY FROM THE SERVER_TREE ]
+          </p>
+
+          <div class="grid gap-3">
+            <template x-for="f in files" :key="f.path">
+              <label class="panel flex cursor-pointer items-center gap-4 px-4 py-3"
+                     :class="{ 'glow': selected.has(f.path), 'opacity-40': f.queued || (!f.wouldReduce && !selected.has(f.path)) }">
+                <input type="checkbox" class="h-4 w-4 accent-[#00f2ff]"
+                       :disabled="f.queued"
+                       :checked="selected.has(f.path)"
+                       @change="toggle(f)">
+                <span class="min-w-0 flex-1 truncate font-mono text-sm" x-text="f.name"></span>
+                <span class="font-mono text-xs text-on-surface-variant" x-text="f.probeError ? 'UNREADABLE' : `${f.width}x${f.height}`"></span>
+                <span class="font-mono text-xs text-on-surface-variant" x-text="f.codec ?? '-'"></span>
+                <span class="w-20 text-right font-mono text-xs" x-text="fmtSize(f.size)"></span>
+                <span x-show="f.queued" class="pill text-toxic">[ QUEUED ]</span>
+                <span x-show="!f.queued && !f.wouldReduce && !f.probeError" class="pill text-outline"
+                      x-text="`[ ALREADY ${Math.min(f.width, f.height)}P ]`"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+
+        <div class="panel flex items-center gap-6 border-t border-outline-variant px-6 py-4">
+          <span class="font-mono text-sm text-toxic" x-text="`● ${selected.size} FILES SELECTED`"></span>
+          <span class="font-mono text-xs text-on-surface-variant" x-text="`TOTAL_SIZE: ${fmtSize(selectedBytes)}`"></span>
+          <button @click="addSelected()" :disabled="!selected.size"
+                  class="ml-auto bg-accent px-8 py-3 font-mono text-sm font-bold tracking-[0.1em] text-on-accent disabled:opacity-30">
+            + ADD_TO_PIPELINE
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= QUEUE (filled in by Task 13) ================= -->
+    <section x-show="view === 'queue'" class="p-8" id="queue-view"></section>
+
+  </main>
+</div>
+
+<!-- SETTINGS PANEL (filled in by Task 14) -->
+<div x-show="settingsOpen" id="settings-panel"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
