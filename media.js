@@ -1,5 +1,8 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 export function badRequest(message) {
   const err = new Error(message);
@@ -42,4 +45,111 @@ export function targetDims(width, height, targetShortSide) {
     return { width: evenDown((width * target) / height), height: target };
   }
   return { width: target, height: evenDown((height * target) / width) };
+}
+
+const run = promisify(execFile);
+
+export const VIDEO_EXTENSIONS = [
+  'mkv', 'mp4', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', 'ts', 'm2ts', 'webm',
+];
+
+const TRASH_DIR = '.trash';
+
+function isVideo(name) {
+  const ext = path.extname(name).slice(1).toLowerCase();
+  return VIDEO_EXTENSIONS.includes(ext);
+}
+
+// JSON rather than the script's CSV: ffprobe fixes CSV field order itself, which is
+// easy to read back in the wrong order. One call gets both stream and format data —
+// the ':' separates sections in a single -show_entries argument.
+export async function probeVideo(file) {
+  const { stdout } = await run('ffprobe', [
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-show_entries', 'stream=codec_name,width,height:format=duration',
+    '-of', 'json',
+    file,
+  ]);
+  const data = JSON.parse(stdout);
+  const stream = data.streams?.[0];
+  if (!stream || !Number.isFinite(stream.width) || !Number.isFinite(stream.height)) return null;
+  return {
+    codec: stream.codec_name ?? null,
+    width: stream.width,
+    height: stream.height,
+    duration: Number(data.format?.duration) || null,
+  };
+}
+
+export async function probeAudioCodec(file) {
+  const { stdout } = await run('ffprobe', [
+    '-v', 'error',
+    '-select_streams', 'a:0',
+    '-show_entries', 'stream=codec_name',
+    '-of', 'default=nw=1:nk=1',
+    file,
+  ]);
+  return stdout.trim() || null;
+}
+
+export async function listDirs(absDir) {
+  const entries = await fsp.readdir(absDir, { withFileTypes: true });
+  return entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .map((e) => path.join(absDir, e.name))
+    .sort();
+}
+
+async function walk(dir, out) {
+  const entries = await fsp.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === TRASH_DIR) continue;
+      await walk(full, out);
+    } else if (entry.isFile() && !entry.name.startsWith('.') && isVideo(entry.name)) {
+      out.push(full);
+    }
+  }
+}
+
+// Bounded-concurrency map. ffprobe on a few thousand files serially is minutes;
+// four at a time is seconds and still leaves the disk usable.
+async function pool(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+export async function scanTree(absDir, { probe = probeVideo, concurrency = 4 } = {}) {
+  const files = [];
+  await walk(absDir, files);
+  files.sort();
+
+  return pool(files, concurrency, async (file) => {
+    const size = (await fsp.stat(file)).size;
+    let info = null;
+    try {
+      info = await probe(file);
+    } catch {
+      info = null;
+    }
+    return {
+      path: file,
+      size,
+      codec: info?.codec ?? null,
+      width: info?.width ?? null,
+      height: info?.height ?? null,
+      duration: info?.duration ?? null,
+      probeError: info === null,
+    };
+  });
 }
