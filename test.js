@@ -846,6 +846,18 @@ describe('runJob', () => {
     assert.equal(getJob(db, job.id).status, 'failed');
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  test('a corrupted settings snapshot fails the job instead of rejecting the promise', async () => {
+    const { db, src, job } = prepare();
+    const corrupted = { ...job, settings_json: 'not json' };
+
+    await assert.doesNotReject(runJob(db, corrupted, deps({ spawn: fakeSpawn() })));
+
+    const row = getJob(db, job.id);
+    assert.equal(row.status, 'failed');
+    assert.equal(fs.existsSync(src), true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
 
 describe('tempPathFor', () => {

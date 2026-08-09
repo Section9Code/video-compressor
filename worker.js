@@ -66,18 +66,22 @@ export async function runJob(db, job, deps) {
     progressIntervalMs = 1000,
   } = deps;
 
-  const settings = JSON.parse(job.settings_json);
-  const tmp = tempPathFor(job.path, settings.container);
-  const final = finalPathFor(job.path, settings.container);
-
-  updateJob(db, job.id, { status: 'processing', progress: 0, bitrate: null, error: null });
+  // Undefined until the try block sets it, so a throw before that point (e.g. a
+  // corrupted settings_json) has nothing to unlink.
+  let tmp;
 
   const fail = async (reason) => {
-    await unlinkQuietly(tmp);
+    if (tmp) await unlinkQuietly(tmp);
     updateJob(db, job.id, { status: 'failed', error: reason, finished_at: now() });
   };
 
   try {
+    const settings = JSON.parse(job.settings_json);
+    tmp = tempPathFor(job.path, settings.container);
+    const final = finalPathFor(job.path, settings.container);
+
+    updateJob(db, job.id, { status: 'processing', progress: 0, bitrate: null, error: null });
+
     const origSize = (await fsp.stat(job.path)).size;
     const audioCodec = await probeAudioCodec(job.path);
 
@@ -153,7 +157,15 @@ export function startWorker(db, deps) {
         await sleep(idleMs);
         continue;
       }
-      await runJob(db, job, deps);
+      try {
+        await runJob(db, job, deps);
+      } catch {
+        // ponytail: runJob is documented to always resolve; this is a last-resort
+        // net so a pathological rejection (e.g. the DB itself failing) can't crash
+        // the process or tight-loop retrying the same stuck row. Not a retry
+        // framework — just backs off like the idle case.
+        await sleep(idleMs);
+      }
     }
   })();
 
