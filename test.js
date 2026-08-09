@@ -544,3 +544,122 @@ describe('verifyEncode', () => {
     }
   });
 });
+
+import { createProgressParser, percentFrom, swapInPlace } from './encode.js';
+
+describe('createProgressParser', () => {
+  test('emits one block per progress marker', () => {
+    const feed = createProgressParser();
+    const blocks = feed('frame=10\nbitrate=1200.0kbits/s\nout_time_us=5000000\nprogress=continue\n');
+    assert.equal(blocks.length, 1);
+    assert.equal(blocks[0].out_time_us, '5000000');
+    assert.equal(blocks[0].bitrate, '1200.0kbits/s');
+    assert.equal(blocks[0].progress, 'continue');
+  });
+
+  test('reassembles blocks split across chunk boundaries', () => {
+    const feed = createProgressParser();
+    assert.deepEqual(feed('out_time_us=500'), []);
+    assert.deepEqual(feed('0000\nprog'), []);
+    const blocks = feed('ress=continue\n');
+    assert.equal(blocks.length, 1);
+    assert.equal(blocks[0].out_time_us, '5000000');
+  });
+
+  test('does not leak keys from one block into the next', () => {
+    const feed = createProgressParser();
+    feed('bitrate=1200.0kbits/s\nout_time_us=1000000\nprogress=continue\n');
+    const [second] = feed('out_time_us=2000000\nprogress=end\n');
+    assert.equal(second.bitrate, undefined);
+    assert.equal(second.progress, 'end');
+  });
+
+  test('ignores lines with no equals sign', () => {
+    const feed = createProgressParser();
+    const blocks = feed('garbage\nout_time_us=1000000\nprogress=continue\n');
+    assert.equal(blocks.length, 1);
+    assert.equal(blocks[0].out_time_us, '1000000');
+  });
+});
+
+describe('percentFrom', () => {
+  test('converts microseconds against the duration', () => {
+    assert.equal(percentFrom({ out_time_us: '30000000' }, 60), 50);
+  });
+
+  test('clamps to 100 when ffmpeg overshoots', () => {
+    assert.equal(percentFrom({ out_time_us: '61000000' }, 60), 100);
+  });
+
+  test('returns null without a usable duration or timestamp', () => {
+    assert.equal(percentFrom({ out_time_us: '30000000' }, 0), null);
+    assert.equal(percentFrom({ out_time_us: 'N/A' }, 60), null);
+    assert.equal(percentFrom({}, 60), null);
+  });
+});
+
+describe('swapInPlace', () => {
+  let root;
+
+  const setup = () => {
+    root = fs.realpathSync(tmpdir('vc-swap-'));
+    fs.mkdirSync(path.join(root, 'movies'));
+    return root;
+  };
+
+  test('moves the original into trash and the temp file into place', async () => {
+    setup();
+    const src = path.join(root, 'movies', 'a.mkv');
+    const tmp = path.join(root, 'movies', '.a.tmp.mp4');
+    const final = path.join(root, 'movies', 'a.mp4');
+    fs.writeFileSync(src, 'original');
+    fs.writeFileSync(tmp, 'new');
+
+    const trashPath = await swapInPlace({ src, tmp, final, mediaRoot: root });
+
+    assert.equal(fs.readFileSync(final, 'utf8'), 'new');
+    assert.equal(fs.existsSync(src), false);
+    assert.equal(fs.existsSync(tmp), false);
+    assert.equal(trashPath, path.join(root, '.trash', 'movies', 'a.mkv'));
+    assert.equal(fs.readFileSync(trashPath, 'utf8'), 'original');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('does not overwrite an existing file in trash', async () => {
+    setup();
+    const src = path.join(root, 'movies', 'a.mkv');
+    fs.mkdirSync(path.join(root, '.trash', 'movies'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.trash', 'movies', 'a.mkv'), 'older');
+    fs.writeFileSync(src, 'original');
+    fs.writeFileSync(path.join(root, 'movies', '.a.tmp.mp4'), 'new');
+
+    const trashPath = await swapInPlace({
+      src,
+      tmp: path.join(root, 'movies', '.a.tmp.mp4'),
+      final: path.join(root, 'movies', 'a.mp4'),
+      mediaRoot: root,
+    });
+
+    assert.equal(trashPath, path.join(root, '.trash', 'movies', 'a.mkv.1'));
+    assert.equal(fs.readFileSync(path.join(root, '.trash', 'movies', 'a.mkv'), 'utf8'), 'older');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('restores the original when moving the temp file into place fails', async () => {
+    setup();
+    const src = path.join(root, 'movies', 'a.mkv');
+    const tmp = path.join(root, 'movies', '.a.tmp.mp4');
+    fs.writeFileSync(src, 'original');
+    fs.writeFileSync(tmp, 'new');
+
+    await assert.rejects(swapInPlace({
+      src,
+      tmp,
+      final: path.join(root, 'movies', 'no-such-dir', 'a.mp4'),
+      mediaRoot: root,
+    }));
+
+    assert.equal(fs.readFileSync(src, 'utf8'), 'original', 'original must be back in place');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
