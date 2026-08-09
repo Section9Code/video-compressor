@@ -24,3 +24,22 @@ export function resolveSafe(root, rel) {
   }
   return real;
 }
+
+// Hardware encoders reject odd dimensions.
+export function evenDown(n) {
+  return Math.floor(n / 2) * 2;
+}
+
+export function wouldReduce(width, height, targetShortSide) {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
+  return Math.min(width, height) > targetShortSide;
+}
+
+// Scale the shorter side to the target, preserve aspect ratio, keep both sides even.
+export function targetDims(width, height, targetShortSide) {
+  const target = evenDown(targetShortSide);
+  if (width >= height) {
+    return { width: evenDown((width * target) / height), height: target };
+  }
+  return { width: target, height: evenDown((height * target) / width) };
+}

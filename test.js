@@ -65,3 +65,64 @@ describe('resolveSafe', () => {
     }
   });
 });
+
+import { evenDown, wouldReduce, targetDims } from './media.js';
+
+describe('evenDown', () => {
+  test('rounds odd numbers down to even', () => {
+    assert.equal(evenDown(1279), 1278);
+    assert.equal(evenDown(1280), 1280);
+    assert.equal(evenDown(1), 0);
+  });
+});
+
+describe('wouldReduce', () => {
+  test('is false when the shorter side already equals the target', () => {
+    assert.equal(wouldReduce(1280, 720, 720), false);
+  });
+
+  test('is true when the shorter side exceeds the target', () => {
+    assert.equal(wouldReduce(1920, 1080, 720), true);
+  });
+
+  test('uses the shorter side, so portrait video is judged correctly', () => {
+    assert.equal(wouldReduce(720, 1280, 720), false);
+    assert.equal(wouldReduce(1080, 1920, 720), true);
+  });
+
+  test('respects a raised target', () => {
+    assert.equal(wouldReduce(1920, 1080, 1080), false);
+    assert.equal(wouldReduce(3840, 2160, 1080), true);
+  });
+
+  test('is false for unreadable dimensions', () => {
+    assert.equal(wouldReduce(undefined, undefined, 720), false);
+    assert.equal(wouldReduce(NaN, 1080, 720), false);
+  });
+});
+
+describe('targetDims', () => {
+  test('scales landscape by height, preserving aspect ratio', () => {
+    assert.deepEqual(targetDims(1920, 1080, 720), { width: 1280, height: 720 });
+  });
+
+  test('scales portrait by width, preserving aspect ratio', () => {
+    assert.deepEqual(targetDims(1080, 1920, 720), { width: 720, height: 1280 });
+  });
+
+  test('rounds the computed side down to even', () => {
+    assert.deepEqual(targetDims(1919, 1080, 720), { width: 1278, height: 720 });
+  });
+
+  test('handles a square source', () => {
+    assert.deepEqual(targetDims(1080, 1080, 720), { width: 720, height: 720 });
+  });
+
+  test('both sides are always even', () => {
+    for (const [w, h] of [[1921, 1081], [999, 1777], [3840, 2160]]) {
+      const d = targetDims(w, h, 720);
+      assert.equal(d.width % 2, 0, `width ${d.width} for ${w}x${h}`);
+      assert.equal(d.height % 2, 0, `height ${d.height} for ${w}x${h}`);
+    }
+  });
+});
