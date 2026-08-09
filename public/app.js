@@ -10,6 +10,7 @@ function app() {
     selected: new Set(),
     jobs: [],
     error: null,
+    settingsError: null,
 
     async boot() {
       this.$watch('view', (v) => { location.hash = `#/${v}`; });
@@ -183,6 +184,22 @@ function app() {
       const units = ['B', 'KB', 'MB', 'GB', 'TB'];
       const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
       return `${(bytes / 1024 ** i).toFixed(i ? 1 : 0)} ${units[i]}`;
+    },
+
+    async saveSettings() {
+      this.settingsError = null;
+      try {
+        this.settings = await this.json('/api/settings', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(this.settings),
+        });
+        this.settingsOpen = false;
+        // The target changed, so which files are worth queueing changed with it.
+        if (this.files.length) this.selectAllReducible();
+      } catch (err) {
+        this.settingsError = err.message;
+      }
     },
   };
 }

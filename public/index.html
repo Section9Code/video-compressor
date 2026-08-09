@@ -247,8 +247,83 @@
   </main>
 </div>
 
-<!-- SETTINGS PANEL (filled in by Task 14) -->
-<div x-show="settingsOpen" id="settings-panel"></div>
+<!-- SETTINGS PANEL -->
+<div x-show="settingsOpen" x-cloak class="fixed inset-0 z-50 flex" @keydown.escape.window="settingsOpen = false">
+  <div class="flex-1 bg-black/60" @click="settingsOpen = false"></div>
+
+  <div class="panel glow w-[420px] overflow-y-auto p-8">
+    <div class="flex items-center justify-between">
+      <h3 class="font-mono text-lg font-bold tracking-[0.1em] text-accent">ENCODE_PARAMS</h3>
+      <button @click="settingsOpen = false" class="font-mono text-sm text-outline hover:text-on-surface">[ X ]</button>
+    </div>
+
+    <p class="mt-2 font-mono text-xs text-on-surface-variant">
+      Applied to files as they are added to the pipeline. Queued jobs keep the
+      settings they were added with.
+    </p>
+
+    <div class="mt-8 flex flex-col gap-6">
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">TARGET_SHORT_SIDE</span>
+        <select x-model.number="settings.targetShortSide"
+                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+          <template x-for="v in [480, 540, 720, 1080, 1440]" :key="v">
+            <option :value="v" x-text="`${v}p`"></option>
+          </template>
+        </select>
+      </label>
+
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">
+          QUALITY <span class="text-outline">(QP/CRF — lower is better)</span>
+        </span>
+        <div class="mt-2 flex items-center gap-4">
+          <input type="range" min="18" max="32" step="1" x-model.number="settings.quality" class="flex-1 accent-[#00f2ff]">
+          <span class="w-10 text-right font-mono text-lg text-accent" x-text="settings.quality"></span>
+        </div>
+      </label>
+
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">ENCODER</span>
+        <select x-model="settings.encoder"
+                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+          <option value="vaapi">vaapi — Intel hardware (recommended)</option>
+          <option value="qsv">qsv — Intel Quick Sync</option>
+          <option value="software">software — libx265 (slow, no GPU needed)</option>
+        </select>
+      </label>
+
+      <label class="block" x-show="settings.encoder === 'vaapi'">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">VAAPI_DEVICE</span>
+        <input type="text" x-model="settings.vaapiDevice"
+               class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+      </label>
+
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">CONTAINER</span>
+        <select x-model="settings.container"
+                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+          <option value="mp4">mp4 — maximum compatibility, drops subtitles</option>
+          <option value="mkv">mkv — keeps subtitles and extra streams</option>
+        </select>
+      </label>
+
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">AUDIO_BITRATE</span>
+        <input type="text" x-model="settings.audioBitrate" placeholder="128k"
+               class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+        <span class="mt-1 block font-mono text-xs text-outline">Only used when the source audio is not already AAC.</span>
+      </label>
+    </div>
+
+    <p x-show="settingsError" class="mt-6 font-mono text-xs text-error" x-text="settingsError"></p>
+
+    <button @click="saveSettings()"
+            class="mt-8 w-full bg-accent px-6 py-3 font-mono text-sm font-bold tracking-[0.1em] text-on-accent">
+      SAVE_PARAMS
+    </button>
+  </div>
+</div>
 
 <script src="/app.js"></script>
 </body>
