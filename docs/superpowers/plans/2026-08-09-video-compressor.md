@@ -1600,9 +1600,11 @@ function fakeSpawn({ exitCode = 0, stdout = '', stderr = '', writesOutput = null
     const child = new EventEmitter();
     child.stdout = Readable.from([stdout]);
     child.stderr = Readable.from([stderr]);
-    setImmediate(() => {
-      child.stdout.on('end', () => setImmediate(() => child.emit('close', exitCode)));
-    });
+    // Attach 'end' synchronously: the stream stays paused until runFfmpeg adds its
+    // own 'data' listener, so this cannot fire early. Deferring the attach with
+    // setImmediate misses 'end' entirely, because Readable.from flushes on a
+    // nextTick chain that drains before the check phase — and the test then hangs.
+    child.stdout.on('end', () => setImmediate(() => child.emit('close', exitCode)));
     return child;
   };
   spawn.calls = calls;
@@ -2284,7 +2286,7 @@ Create `src/app.css`:
    It is exposed here as `accent` so the intent is unambiguous at call sites. */
 @theme {
   --color-surface: #131315;
-  --color-surface-dim: #0e0e10;
+  --color-surface-dim: #131315;
   --color-surface-container-lowest: #0e0e10;
   --color-surface-container-low: #1c1b1d;
   --color-surface-container: #201f21;
@@ -2313,7 +2315,6 @@ Create `src/app.css`:
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
-  --radius-none: 0px;
 }
 
 /* Sharp corners everywhere: the design system sets roundedness to 0px. */
@@ -3100,14 +3101,15 @@ RUN npm run build
 # --- runtime -------------------------------------------------------------------
 FROM node:24-slim
 
-# intel-media-va-driver-nonfree lives in Debian's non-free component, which the
-# base image does not enable. The codename is read from the image so this keeps
+# intel-media-va-driver-non-free lives in Debian's non-free component, which the
+# base image does not enable. The signed-by is required: without it apt refuses to
+# merge this plain source with the base image's deb822 sources. The codename is read from the image so this keeps
 # working across base image bumps.
 RUN . /etc/os-release && \
-    echo "deb http://deb.debian.org/debian ${VERSION_CODENAME} non-free non-free-firmware" \
+    echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian ${VERSION_CODENAME} non-free non-free-firmware" \
       > /etc/apt/sources.list.d/nonfree.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg intel-media-va-driver-nonfree vainfo && \
+    apt-get install -y --no-install-recommends ffmpeg intel-media-va-driver-non-free vainfo && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -3447,33 +3449,24 @@ export function withinSchedule(date, settings) {
 }
 ```
 
-Replace `startWorker` with:
+Add the schedule check to `startWorker`'s loop. **Do not replace the whole
+function** — Task 9's fix wrapped the loop body in a `try/catch` so that a
+rejection cannot kill the fire-and-forget IIFE, and that guard must survive.
+Add the check as the first statement inside the existing guarded body:
 
 ```js
-export function startWorker(db, deps) {
-  const { idleMs = 2000, now = Date.now } = deps;
-  let stopped = false;
-
-  (async () => {
-    while (!stopped) {
       // Read live rather than from the job snapshot: this is policy about when work
       // may start, so a schedule change should take effect immediately.
       if (!withinSchedule(new Date(now()), getSettings(db))) {
         await sleep(idleMs);
         continue;
       }
-      const job = nextWaiting(db);
-      if (!job) {
-        await sleep(idleMs);
-        continue;
-      }
-      await runJob(db, job, deps);
-    }
-  })();
-
-  return () => { stopped = true; };
-}
 ```
+
+`getSettings(db)` runs on every iteration and can throw, so it must sit inside
+the same `try/catch` as `runJob` — an unguarded throw here would kill the
+process on an idle queue, with no job involved at all. `startWorker` also needs
+`now` destructured from `deps` (defaulting to `Date.now`) if it is not already.
 
 - [ ] **Step 5: Report the schedule state from the API**
 

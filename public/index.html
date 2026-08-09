@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIDEO_COMPRESSOR</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
+<script defer src="/alpine.js"></script>
+</head>
+<body class="min-h-screen" x-data="app()" x-init="boot()">
+
+<div class="flex min-h-screen">
+
+  <!-- SIDEBAR -->
+  <aside class="w-[280px] shrink-0 border-r border-outline-variant bg-surface-container-lowest p-6 flex flex-col">
+    <h1 class="font-mono text-lg font-bold tracking-[0.1em] text-accent">VIDEO_<wbr>COMPRESSOR</h1>
+    <p class="mt-1 font-mono text-xs tracking-[0.1em] text-on-surface-variant">[ HEVC_PIPELINE ]</p>
+    <p x-show="error" class="mt-4 pill text-error" x-text="`[ ERROR: ${error} ]`"></p>
+
+    <nav class="mt-10 flex flex-col gap-1">
+      <button @click="view = 'browse'" class="px-4 py-3 text-left font-mono text-sm tracking-[0.05em] border-l-2"
+              :class="view === 'browse' ? 'border-accent text-accent bg-surface-container' : 'border-transparent text-on-surface-variant hover:text-on-surface'">
+        FILE_TERMINAL
+      </button>
+      <button @click="view = 'queue'" class="px-4 py-3 text-left font-mono text-sm tracking-[0.05em] border-l-2"
+              :class="view === 'queue' ? 'border-accent text-accent bg-surface-container' : 'border-transparent text-on-surface-variant hover:text-on-surface'">
+        DATA_PROCESSOR
+        <span x-show="activeCount" class="ml-2 pill text-toxic" x-text="activeCount"></span>
+      </button>
+    </nav>
+
+    <div class="mt-auto">
+      <button @click="settingsOpen = true"
+              class="w-full border border-accent px-4 py-3 font-mono text-sm tracking-[0.1em] text-accent hover:glow">
+        ENCODE_PARAMS
+      </button>
+      <p class="mt-4 font-mono text-xs text-outline" x-text="`ENCODER: ${settings.encoder?.toUpperCase() ?? '...'}`"></p>
+      <p class="font-mono text-xs text-outline" x-text="`TARGET: ${settings.targetShortSide ?? '...'}P / QP ${settings.quality ?? '..'}`"></p>
+      <p x-show="schedule.enabled" class="font-mono text-xs text-outline"
+         x-text="`WINDOW: ${hhmm(schedule.startHour)}–${hhmm(schedule.endHour)}`"></p>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="flex-1 min-w-0">
+
+    <!-- ================= BROWSE ================= -->
+    <section x-show="view === 'browse'" class="flex h-screen">
+
+      <!-- tree -->
+      <div class="w-[320px] shrink-0 overflow-y-auto border-r border-outline-variant p-4">
+        <p class="mb-4 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">SERVER_TREE</p>
+        <template x-for="node in tree" :key="node.path">
+          <button @click="scanDir(node.path)"
+                  class="block w-full truncate px-2 py-2 text-left font-mono text-sm"
+                  :style="`padding-left: ${node.depth * 14 + 8}px`"
+                  :class="scanPath === node.path ? 'bg-surface-container text-accent border-l-2 border-accent' : 'text-on-surface-variant hover:text-on-surface'">
+            <span x-text="node.open ? '▾' : '▸'" class="mr-1 text-outline"></span>
+            <span x-text="node.name"></span>
+          </button>
+        </template>
+      </div>
+
+      <!-- files -->
+      <div class="flex min-w-0 flex-1 flex-col">
+        <div class="border-b border-outline-variant px-6 py-4">
+          <p class="font-mono text-sm text-on-surface-variant">
+            <span class="text-outline">ROOT</span>
+            <template x-for="crumb in breadcrumbs" :key="crumb">
+              <span><span class="mx-2 text-outline">/</span><span class="text-accent" x-text="crumb"></span></span>
+            </template>
+          </p>
+        </div>
+
+        <div class="flex items-center gap-4 border-b border-outline-variant px-6 py-3">
+          <button @click="selectAllReducible()" class="font-mono text-xs tracking-[0.1em] text-on-surface-variant hover:text-accent">
+            SELECT_ALL_REDUCIBLE
+          </button>
+          <button @click="selected = new Set()" class="font-mono text-xs tracking-[0.1em] text-on-surface-variant hover:text-accent">
+            CLEAR
+          </button>
+          <span class="ml-auto font-mono text-xs text-outline" x-text="scanning ? '[ SCANNING... ]' : `[ ${files.length} FILES ]`"></span>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-6">
+          <p x-show="!scanning && !files.length" class="font-mono text-sm text-outline">
+            [ SELECT A DIRECTORY FROM THE SERVER_TREE ]
+          </p>
+
+          <div class="grid gap-3">
+            <template x-for="f in files" :key="f.path">
+              <label class="panel flex cursor-pointer items-center gap-4 px-4 py-3"
+                     :class="{ 'glow': selected.has(f.path), 'opacity-40': f.queued || (!reducible(f) && !selected.has(f.path)) }">
+                <input type="checkbox" class="h-4 w-4 accent-[#00f2ff]"
+                       :disabled="f.queued"
+                       :checked="selected.has(f.path)"
+                       @change="toggle(f)">
+                <span class="min-w-0 flex-1 truncate font-mono text-sm" x-text="f.name"></span>
+                <span class="font-mono text-xs text-on-surface-variant" x-text="f.probeError ? 'UNREADABLE' : `${f.width}x${f.height}`"></span>
+                <span class="font-mono text-xs text-on-surface-variant" x-text="f.codec ?? '-'"></span>
+                <span class="w-20 text-right font-mono text-xs" x-text="fmtSize(f.size)"></span>
+                <span x-show="f.queued" class="pill text-toxic">[ QUEUED ]</span>
+                <span x-show="!f.queued && !reducible(f) && !f.probeError" class="pill text-outline"
+                      x-text="`[ ALREADY ${Math.min(f.width, f.height)}P ]`"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+
+        <div class="panel flex items-center gap-6 border-t border-outline-variant px-6 py-4">
+          <span class="font-mono text-sm text-toxic" x-text="`● ${selected.size} FILES SELECTED`"></span>
+          <span class="font-mono text-xs text-on-surface-variant" x-text="`TOTAL_SIZE: ${fmtSize(selectedBytes)}`"></span>
+          <button @click="addSelected()" :disabled="!selected.size"
+                  class="ml-auto bg-accent px-8 py-3 font-mono text-sm font-bold tracking-[0.1em] text-on-accent disabled:opacity-30">
+            + ADD_TO_PIPELINE
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= QUEUE ================= -->
+    <section x-show="view === 'queue'" class="h-screen overflow-y-auto p-8">
+      <div class="mb-8 flex items-start justify-between">
+        <h2 class="font-sans text-5xl font-extrabold leading-tight tracking-[-0.02em]">
+          DATA_PROCESSOR <span class="text-outline">//</span><br>VIDEO_ENCODE
+        </h2>
+        <span class="pill"
+              :class="active ? 'text-toxic' : scheduleHeld ? 'text-magenta-soft' : 'text-outline'"
+              x-text="active ? '[ ACTIVE ]' : scheduleHeld ? '[ WAITING FOR WINDOW ]' : '[ IDLE ]'"></span>
+      </div>
+
+      <div class="grid gap-8 lg:grid-cols-[1fr_2fr]">
+
+        <!-- PENDING -->
+        <div>
+          <div x-show="scheduleHeld" class="panel mb-3 border-magenta px-4 py-3">
+            <p class="font-mono text-xs font-bold tracking-[0.1em] text-magenta-soft"
+               x-text="`[ SCHEDULED — QUEUE RESUMES AT ${hhmm(schedule.startHour)} ]`"></p>
+            <p class="mt-1 font-mono text-xs text-on-surface-variant"
+               x-text="`${pending.length} file(s) held. Encoding runs ${hhmm(schedule.startHour)}–${hhmm(schedule.endHour)}.`"></p>
+          </div>
+
+          <p x-show="schedule.enabled && schedule.open" class="mb-3 font-mono text-xs tracking-[0.1em] text-toxic"
+             x-text="`[ WINDOW OPEN UNTIL ${hhmm(schedule.endHour)} ]`"></p>
+
+          <p class="mb-3 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">PENDING_QUEUE</p>
+          <div class="panel p-4">
+            <p x-show="!pending.length" class="font-mono text-sm text-outline">[ EMPTY ]</p>
+            <template x-for="job in pending" :key="job.id">
+              <div class="flex items-center gap-3 border-b border-outline-variant py-3 last:border-0">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate font-mono text-sm" x-text="job.name"></p>
+                  <p class="font-mono text-xs text-on-surface-variant"
+                     x-text="`${fmtSize(job.orig_size)} | ${job.width}x${job.height}`"></p>
+                </div>
+                <button @click="removeJob(job.id)" class="font-mono text-xs text-outline hover:text-error">[ X ]</button>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- ACTIVE -->
+        <div>
+          <p class="mb-3 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">ACTIVE_PROCESS</p>
+          <div class="panel p-6" :class="active && 'glow'">
+            <template x-if="!active">
+              <p class="font-mono text-sm text-outline">[ NO ACTIVE ENCODE ]</p>
+            </template>
+
+            <template x-if="active">
+              <div>
+                <div class="flex items-start justify-between">
+                  <div class="min-w-0">
+                    <p class="truncate font-mono text-xl" x-text="active.name"></p>
+                    <p class="mt-1 font-mono text-xs text-on-surface-variant"
+                       x-text="`ENCODING: H.265 / HEVC | ${active.width}x${active.height} → ${active.settings.targetShortSide}P | ${active.settings.encoder.toUpperCase()}`"></p>
+                  </div>
+                  <div class="shrink-0 text-right">
+                    <p class="font-sans text-5xl font-extrabold text-accent" x-text="`${active.progress}%`"></p>
+                    <p class="font-mono text-xs tracking-[0.1em] text-on-surface-variant">PROCESSING...</p>
+                  </div>
+                </div>
+
+                <div class="bar relative mt-6">
+                  <div class="bar-fill absolute inset-y-0 left-0"
+                       :style="`width: ${active.progress}%`"></div>
+                </div>
+
+                <div class="mt-6 grid grid-cols-3 gap-4 border-t border-outline-variant pt-4">
+                  <div>
+                    <p class="font-mono text-xs tracking-[0.1em] text-outline">TIME_REMAINING</p>
+                    <p class="font-mono text-sm" x-text="eta(active)"></p>
+                  </div>
+                  <div>
+                    <p class="font-mono text-xs tracking-[0.1em] text-outline">CURRENT_BITRATE</p>
+                    <p class="font-mono text-sm" x-text="active.bitrate ?? '-'"></p>
+                  </div>
+                  <div>
+                    <p class="font-mono text-xs tracking-[0.1em] text-outline">ORIGINAL_SIZE</p>
+                    <p class="font-mono text-sm" x-text="fmtSize(active.orig_size)"></p>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- ARCHIVE -->
+      <div class="mt-10">
+        <p class="mb-3 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">COMPLETED_ARCHIVE</p>
+        <div class="panel">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-outline-variant font-mono text-xs tracking-[0.1em] text-outline">
+                <th class="px-6 py-4 text-left">FILENAME</th>
+                <th class="px-6 py-4 text-right">ORIGINAL</th>
+                <th class="px-6 py-4 text-right">COMPRESSED</th>
+                <th class="px-6 py-4 text-right">SAVING</th>
+                <th class="px-6 py-4 text-right"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="job in archive" :key="job.id">
+                <tr class="border-b border-outline-variant last:border-0 align-top">
+                  <td class="px-6 py-4">
+                    <p class="font-mono text-sm" x-text="job.name"></p>
+                    <p x-show="job.error" class="mt-1 max-w-xl whitespace-pre-wrap font-mono text-xs text-error"
+                       x-text="job.error"></p>
+                  </td>
+                  <td class="px-6 py-4 text-right font-mono text-sm text-on-surface-variant"
+                      x-text="fmtSize(job.orig_size)"></td>
+                  <td class="px-6 py-4 text-right font-mono text-sm text-accent"
+                      x-text="job.new_size ? fmtSize(job.new_size) : '-'"></td>
+                  <td class="px-6 py-4 text-right font-mono text-sm"
+                      :class="{ 'text-toxic': job.status === 'done', 'text-outline': job.status === 'skipped', 'text-error': job.status === 'failed' }"
+                      x-text="job.status === 'done' ? `${savingPct(job)}% REDUCTION` : `[ ${job.status.toUpperCase()} ]`"></td>
+                  <td class="px-6 py-4 text-right">
+                    <button x-show="job.status !== 'done'" @click="requeue(job.id)"
+                            class="font-mono text-xs text-outline hover:text-accent">[ RETRY ]</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="!archive.length">
+                <td colspan="5" class="px-6 py-6 font-mono text-sm text-outline">[ NOTHING PROCESSED YET ]</td>
+              </tr>
+            </tbody>
+            <tfoot x-show="totalSaved > 0">
+              <tr class="border-t border-outline-variant">
+                <td colspan="3" class="px-6 py-4 font-mono text-xs tracking-[0.1em] text-outline">TOTAL_RECLAIMED</td>
+                <td colspan="2" class="px-6 py-4 text-right font-mono text-sm text-toxic" x-text="fmtSize(totalSaved)"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- SETTINGS PANEL -->
+<div x-show="settingsOpen" x-cloak class="fixed inset-0 z-50 flex" @keydown.escape.window="settingsOpen = false">
+  <div class="flex-1 bg-black/60" @click="settingsOpen = false"></div>
+
+  <div class="panel glow w-[420px] overflow-y-auto p-8">
+    <div class="flex items-center justify-between">
+      <h3 class="font-mono text-lg font-bold tracking-[0.1em] text-accent">ENCODE_PARAMS</h3>
+      <button @click="settingsOpen = false" class="font-mono text-sm text-outline hover:text-on-surface">[ X ]</button>
+    </div>
+
+    <p class="mt-2 font-mono text-xs text-on-surface-variant">
+      Applied to files as they are added to the pipeline. Queued jobs keep the
+      settings they were added with.
+    </p>
+
+    <div class="mt-8 flex flex-col gap-6">
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">TARGET_SHORT_SIDE</span>
+        <select x-model.number="settings.targetShortSide"
+                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+          <template x-for="v in [480, 540, 720, 1080, 1440]" :key="v">
+            <option :value="v" x-text="`${v}p`"></option>
+          </template>
+        </select>
+      </label>
+
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">
+          QUALITY <span class="text-outline">(QP/CRF — lower is better)</span>
+        </span>
+        <div class="mt-2 flex items-center gap-4">
+          <input type="range" min="18" max="32" step="1" x-model.number="settings.quality" class="flex-1 accent-[#00f2ff]">
+          <span class="w-10 text-right font-mono text-lg text-accent" x-text="settings.quality"></span>
+        </div>
+      </label>
+
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">ENCODER</span>
+        <select x-model="settings.encoder"
+                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+          <option value="vaapi">vaapi — Intel hardware (recommended)</option>
+          <option value="qsv">qsv — Intel Quick Sync</option>
+          <option value="software">software — libx265 (slow, no GPU needed)</option>
+        </select>
+      </label>
+
+      <label class="block" x-show="settings.encoder === 'vaapi'">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">VAAPI_DEVICE</span>
+        <input type="text" x-model="settings.vaapiDevice"
+               class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+      </label>
+
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">CONTAINER</span>
+        <select x-model="settings.container"
+                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+          <option value="mp4">mp4 — maximum compatibility, drops subtitles</option>
+          <option value="mkv">mkv — keeps subtitles and extra streams</option>
+        </select>
+      </label>
+
+      <label class="block">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">AUDIO_BITRATE</span>
+        <input type="text" x-model="settings.audioBitrate" placeholder="128k"
+               class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+        <span class="mt-1 block font-mono text-xs text-outline">Only used when the source audio is not already AAC.</span>
+      </label>
+
+      <div class="border-t border-outline-variant pt-6">
+        <label class="flex cursor-pointer items-center gap-3">
+          <input type="checkbox" x-model="settings.scheduleEnabled" class="h-4 w-4 accent-[#00f2ff]">
+          <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">ENCODE_SCHEDULE</span>
+        </label>
+        <p class="mt-2 font-mono text-xs text-outline">
+          Only start new encodes inside this window. A file already encoding when the
+          window closes is allowed to finish.
+        </p>
+
+        <div x-show="settings.scheduleEnabled" class="mt-4 flex items-center gap-3">
+          <select x-model.number="settings.scheduleStartHour"
+                  class="flex-1 border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+            <template x-for="h in 24" :key="h">
+              <option :value="h - 1" x-text="hhmm(h - 1)"></option>
+            </template>
+          </select>
+          <span class="font-mono text-sm text-outline">→</span>
+          <select x-model.number="settings.scheduleEndHour"
+                  class="flex-1 border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+            <template x-for="h in 24" :key="h">
+              <option :value="h - 1" x-text="hhmm(h - 1)"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <p x-show="settingsError" class="mt-6 font-mono text-xs text-error" x-text="settingsError"></p>
+
+    <button @click="saveSettings()"
+            class="mt-8 w-full bg-accent px-6 py-3 font-mono text-sm font-bold tracking-[0.1em] text-on-accent">
+      SAVE_PARAMS
+    </button>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

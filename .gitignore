@@ -3,3 +3,5 @@ public/app.css
 public/alpine.js
 data/
 *.db
+.superpowers/
+.env

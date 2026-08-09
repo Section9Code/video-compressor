@@ -1,0 +1,6 @@
+node_modules
+.git
+docs
+public/app.css
+public/alpine.js
+*.db

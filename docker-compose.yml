@@ -1,0 +1,18 @@
+services:
+  video-compressor:
+    build: .
+    ports:
+      - "3000:3000"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID}"
+    environment:
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - "${MEDIA_DIR}:/media"
+      - queue-data:/data
+    restart: unless-stopped
+
+volumes:
+  queue-data:

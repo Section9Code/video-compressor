@@ -1,0 +1,99 @@
+@import "tailwindcss" source(none);
+
+/* Explicit content sources: only the app's own frontend files, not the
+   docs/design reference mockups (which are v3 Play CDN examples, not app markup). */
+@source "../public/index.html";
+@source "../public/app.js";
+
+/* Cybernetic Core — tokens lifted from docs/design/design.md.
+   Note the palette's `primary` (#e1fdff) is the near-white on-glass text colour;
+   the neon cyan the mockups actually accent with is `primary-container` (#00f2ff).
+   It is exposed here as `accent` so the intent is unambiguous at call sites. */
+@theme {
+  --color-surface: #131315;
+  --color-surface-dim: #131315;
+  --color-surface-container-lowest: #0e0e10;
+  --color-surface-container-low: #1c1b1d;
+  --color-surface-container: #201f21;
+  --color-surface-container-high: #2a2a2c;
+  --color-surface-container-highest: #353437;
+
+  --color-on-surface: #e5e1e4;
+  --color-on-surface-variant: #b9cacb;
+
+  --color-outline: #849495;
+  --color-outline-variant: #3a494b;
+
+  --color-accent: #00f2ff;
+  --color-accent-dim: #00dbe7;
+  --color-on-accent: #00363a;
+
+  --color-magenta: #ff24e4;
+  --color-magenta-soft: #fface8;
+
+  --color-toxic: #34fc0d;
+  --color-toxic-soft: #79ff5b;
+
+  --color-error: #ffb4ab;
+  --color-error-container: #93000a;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+}
+
+/* Sharp corners everywhere: the design system sets roundedness to 0px. */
+* {
+  border-radius: 0 !important;
+}
+
+body {
+  background: var(--color-surface-dim);
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+}
+
+/* Depth comes from backlight and transparency, not shadow. */
+@utility panel {
+  background: color-mix(in srgb, var(--color-surface-container) 70%, transparent);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-outline-variant);
+}
+
+@utility glow {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+@utility pill {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+}
+
+/* Segmented "data stream" progress bar. The width of .bar-fill is set inline. */
+@utility bar {
+  height: 28px;
+  border: 1px solid var(--color-outline-variant);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-surface-container-high) 0 18px,
+    transparent 18px 22px
+  );
+}
+
+/* The completed part of the stream: the same block geometry as the track, lit in
+   Toxic Green. drop-shadow follows the gradient's alpha, so each block glows
+   individually rather than the fill glowing as one slab. */
+@utility bar-fill {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-toxic) 0 18px,
+    transparent 18px 22px
+  );
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--color-toxic) 60%, transparent));
+}
+
+[x-cloak] { display: none !important; }
