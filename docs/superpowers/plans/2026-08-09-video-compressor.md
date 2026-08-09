@@ -3101,14 +3101,15 @@ RUN npm run build
 # --- runtime -------------------------------------------------------------------
 FROM node:24-slim
 
-# intel-media-va-driver-nonfree lives in Debian's non-free component, which the
-# base image does not enable. The codename is read from the image so this keeps
+# intel-media-va-driver-non-free lives in Debian's non-free component, which the
+# base image does not enable. The signed-by is required: without it apt refuses to
+# merge this plain source with the base image's deb822 sources. The codename is read from the image so this keeps
 # working across base image bumps.
 RUN . /etc/os-release && \
-    echo "deb http://deb.debian.org/debian ${VERSION_CODENAME} non-free non-free-firmware" \
+    echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian ${VERSION_CODENAME} non-free non-free-firmware" \
       > /etc/apt/sources.list.d/nonfree.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg intel-media-va-driver-nonfree vainfo && \
+    apt-get install -y --no-install-recommends ffmpeg intel-media-va-driver-non-free vainfo && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
