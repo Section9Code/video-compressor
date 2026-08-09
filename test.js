@@ -1079,7 +1079,7 @@ describe('http api', () => {
   });
 });
 
-import { withinSchedule } from './worker.js';
+import { startWorker, withinSchedule } from './worker.js';
 
 describe('withinSchedule', () => {
   const at = (hour) => new Date(2026, 0, 15, hour, 30, 0);
@@ -1138,5 +1138,20 @@ describe('schedule settings', () => {
 
   test('an equal start and end is allowed while scheduling is off', () => {
     assert.doesNotThrow(() => validateSettings({ scheduleStartHour: 3, scheduleEndHour: 3 }));
+  });
+});
+
+describe('startWorker', () => {
+  // A throw from the schedule check runs on every idle iteration, with no job in
+  // hand — unlike a runJob rejection, it needs no queued work to trigger. Without a
+  // guard around it this would be an unhandled rejection in the fire-and-forget
+  // loop, which kills the process on Node >=15.
+  test('survives a throw from getSettings and keeps looping', async () => {
+    let calls = 0;
+    const db = { prepare() { calls++; throw new Error('boom'); } };
+    const stop = startWorker(db, { idleMs: 5 });
+    await new Promise((r) => setTimeout(r, 50));
+    stop();
+    assert.ok(calls >= 2, 'the loop must survive the throw and keep iterating');
   });
 });

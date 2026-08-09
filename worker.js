@@ -164,18 +164,26 @@ export function startWorker(db, deps) {
 
   (async () => {
     while (!stopped) {
-      // Read live rather than from the job snapshot: this is policy about when work
-      // may start, so a schedule change should take effect immediately.
-      if (!withinSchedule(new Date(now()), getSettings(db))) {
+      try {
+        // Read live rather than from the job snapshot: this is policy about when work
+        // may start, so a schedule change should take effect immediately.
+        if (!withinSchedule(new Date(now()), getSettings(db))) {
+          await sleep(idleMs);
+          continue;
+        }
+        const job = nextWaiting(db);
+        if (!job) {
+          await sleep(idleMs);
+          continue;
+        }
+        await runJob(db, job, deps);
+      } catch {
+        // ponytail: runJob is documented to always resolve; this is a last-resort
+        // net so a pathological rejection (e.g. the DB itself failing, here or in
+        // getSettings/withinSchedule) can't crash the process or tight-loop on a
+        // stuck row. Not a retry framework — just backs off like the idle case.
         await sleep(idleMs);
-        continue;
       }
-      const job = nextWaiting(db);
-      if (!job) {
-        await sleep(idleMs);
-        continue;
-      }
-      await runJob(db, job, deps);
     }
   })();
 
