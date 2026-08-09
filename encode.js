@@ -142,7 +142,14 @@ export async function swapInPlace({ src, tmp, final, mediaRoot }) {
   try {
     await moveFile(tmp, final);
   } catch (err) {
-    await moveFile(trashPath, src);
+    try {
+      await moveFile(trashPath, src);
+    } catch (restoreErr) {
+      throw new Error(
+        `swap failed and restore failed; original is at ${trashPath}: ${restoreErr.message}`,
+        { cause: err },
+      );
+    }
     throw err;
   }
   return trashPath;

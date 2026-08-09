@@ -662,4 +662,44 @@ describe('swapInPlace', () => {
     assert.equal(fs.readFileSync(src, 'utf8'), 'original', 'original must be back in place');
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  test('wraps the original error and names the trash path when the rollback also fails', async () => {
+    setup();
+    const src = path.join(root, 'movies', 'a.mkv');
+    const tmp = path.join(root, 'movies', '.a.tmp.mp4');
+    const trashPath = path.join(root, '.trash', 'movies', 'a.mkv');
+    fs.writeFileSync(src, 'original');
+    fs.writeFileSync(tmp, 'new');
+
+    // Force only the restore move (trashPath -> src) to fail, leaving the
+    // src->trash move and the doomed tmp->final move untouched.
+    const realRename = fsp.rename;
+    fsp.rename = (from, to) => {
+      if (from === trashPath && to === src) return Promise.reject(new Error('restore blocked'));
+      return realRename(from, to);
+    };
+
+    try {
+      await assert.rejects(
+        swapInPlace({
+          src,
+          tmp,
+          final: path.join(root, 'movies', 'no-such-dir', 'a.mp4'),
+          mediaRoot: root,
+        }),
+        (err) => {
+          assert.match(err.message, /restore blocked/);
+          assert.ok(err.message.includes(trashPath), 'error message must name the trash path');
+          assert.ok(err.cause instanceof Error, 'error.cause must be the original tmp->final failure');
+          assert.notEqual(err.cause.message, 'restore blocked');
+          return true;
+        },
+      );
+    } finally {
+      fsp.rename = realRename;
+    }
+
+    assert.equal(fs.readFileSync(trashPath, 'utf8'), 'original', 'original is left recoverable in trash');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
