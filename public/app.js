@@ -122,6 +122,62 @@ function app() {
       this.jobs = (await this.json('/api/jobs')).jobs;
     },
 
+    get pending() {
+      return this.jobs.filter((j) => j.status === 'waiting');
+    },
+
+    get active() {
+      return this.jobs.find((j) => j.status === 'processing') ?? null;
+    },
+
+    get archive() {
+      return this.jobs
+        .filter((j) => ['done', 'skipped', 'failed'].includes(j.status))
+        .sort((a, b) => (b.finished_at ?? 0) - (a.finished_at ?? 0));
+    },
+
+    get totalSaved() {
+      return this.jobs
+        .filter((j) => j.status === 'done')
+        .reduce((n, j) => n + (j.orig_size - j.new_size), 0);
+    },
+
+    savingPct(job) {
+      if (!job.orig_size || !job.new_size) return 0;
+      return Math.round((1 - job.new_size / job.orig_size) * 100);
+    },
+
+    // Extrapolated from percent alone: ffmpeg's own speed figure swings too much
+    // early on to be worth reading, and this is honest about being an estimate.
+    eta(job) {
+      if (!job.progress || !job.duration) return '--:--';
+      const elapsed = (Date.now() - (job.started_at ?? Date.now())) / 1000;
+      if (!elapsed) return '--:--';
+      const total = elapsed / (job.progress / 100);
+      const left = Math.max(0, Math.round(total - elapsed));
+      return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
+    },
+
+    async removeJob(id) {
+      this.error = null;
+      try {
+        await this.json(`/api/jobs/${id}`, { method: 'DELETE' });
+        await this.poll();
+      } catch (err) {
+        this.error = err.message;
+      }
+    },
+
+    async requeue(id) {
+      this.error = null;
+      try {
+        await this.json(`/api/jobs/${id}/requeue`, { method: 'POST' });
+        await this.poll();
+      } catch (err) {
+        this.error = err.message;
+      }
+    },
+
     fmtSize(bytes) {
       if (!bytes) return '0 B';
       const units = ['B', 'KB', 'MB', 'GB', 'TB'];

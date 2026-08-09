@@ -80,7 +80,7 @@ export async function runJob(db, job, deps) {
     tmp = tempPathFor(job.path, settings.container);
     const final = finalPathFor(job.path, settings.container);
 
-    updateJob(db, job.id, { status: 'processing', progress: 0, bitrate: null, error: null });
+    updateJob(db, job.id, { status: 'processing', progress: 0, bitrate: null, error: null, started_at: now() });
 
     const origSize = (await fsp.stat(job.path)).size;
     const audioCodec = await probeAudioCodec(job.path);

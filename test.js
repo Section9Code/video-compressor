@@ -847,6 +847,13 @@ describe('runJob', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  test('started_at is stamped when the job begins', async () => {
+    const { db, job } = prepare();
+    await runJob(db, job, deps({ spawn: fakeSpawn({ writesOutput: 'small' }) }));
+    assert.equal(getJob(db, job.id).started_at, 1700000000000);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   test('a corrupted settings snapshot fails the job instead of rejecting the promise', async () => {
     const { db, src, job } = prepare();
     const corrupted = { ...job, settings_json: 'not json' };

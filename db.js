@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   settings_json TEXT    NOT NULL,
   error         TEXT,
   created_at    INTEGER NOT NULL,
-  finished_at   INTEGER
+  finished_at   INTEGER,
+  started_at    INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs (status, id);
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS settings (
 // caller-supplied key out of the generated SQL.
 const WRITABLE = new Set([
   'status', 'new_size', 'progress', 'bitrate',
-  'final_path', 'trash_path', 'error', 'finished_at',
+  'final_path', 'trash_path', 'error', 'finished_at', 'started_at',
 ]);
 
 export function open(file) {

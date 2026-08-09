@@ -117,8 +117,132 @@
       </div>
     </section>
 
-    <!-- ================= QUEUE (filled in by Task 13) ================= -->
-    <section x-show="view === 'queue'" class="p-8" id="queue-view"></section>
+    <!-- ================= QUEUE ================= -->
+    <section x-show="view === 'queue'" class="h-screen overflow-y-auto p-8">
+      <div class="mb-8 flex items-start justify-between">
+        <h2 class="font-sans text-5xl font-extrabold leading-tight tracking-[-0.02em]">
+          DATA_PROCESSOR <span class="text-outline">//</span><br>VIDEO_ENCODE
+        </h2>
+        <span class="pill" :class="active ? 'text-toxic' : 'text-outline'"
+              x-text="active ? '[ ACTIVE ]' : '[ IDLE ]'"></span>
+      </div>
+
+      <div class="grid gap-8 lg:grid-cols-[1fr_2fr]">
+
+        <!-- PENDING -->
+        <div>
+          <p class="mb-3 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">PENDING_QUEUE</p>
+          <div class="panel p-4">
+            <p x-show="!pending.length" class="font-mono text-sm text-outline">[ EMPTY ]</p>
+            <template x-for="job in pending" :key="job.id">
+              <div class="flex items-center gap-3 border-b border-outline-variant py-3 last:border-0">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate font-mono text-sm" x-text="job.name"></p>
+                  <p class="font-mono text-xs text-on-surface-variant"
+                     x-text="`${fmtSize(job.orig_size)} | ${job.width}x${job.height}`"></p>
+                </div>
+                <button @click="removeJob(job.id)" class="font-mono text-xs text-outline hover:text-error">[ X ]</button>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- ACTIVE -->
+        <div>
+          <p class="mb-3 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">ACTIVE_PROCESS</p>
+          <div class="panel p-6" :class="active && 'glow'">
+            <template x-if="!active">
+              <p class="font-mono text-sm text-outline">[ NO ACTIVE ENCODE ]</p>
+            </template>
+
+            <template x-if="active">
+              <div>
+                <div class="flex items-start justify-between">
+                  <div class="min-w-0">
+                    <p class="truncate font-mono text-xl" x-text="active.name"></p>
+                    <p class="mt-1 font-mono text-xs text-on-surface-variant"
+                       x-text="`ENCODING: H.265 / HEVC | ${active.width}x${active.height} → ${active.settings.targetShortSide}P | ${active.settings.encoder.toUpperCase()}`"></p>
+                  </div>
+                  <div class="shrink-0 text-right">
+                    <p class="font-sans text-5xl font-extrabold text-accent" x-text="`${active.progress}%`"></p>
+                    <p class="font-mono text-xs tracking-[0.1em] text-on-surface-variant">PROCESSING...</p>
+                  </div>
+                </div>
+
+                <div class="bar relative mt-6">
+                  <div class="absolute inset-y-0 left-0 bg-accent opacity-90"
+                       :style="`width: ${active.progress}%`"></div>
+                </div>
+
+                <div class="mt-6 grid grid-cols-3 gap-4 border-t border-outline-variant pt-4">
+                  <div>
+                    <p class="font-mono text-xs tracking-[0.1em] text-outline">TIME_REMAINING</p>
+                    <p class="font-mono text-sm" x-text="eta(active)"></p>
+                  </div>
+                  <div>
+                    <p class="font-mono text-xs tracking-[0.1em] text-outline">CURRENT_BITRATE</p>
+                    <p class="font-mono text-sm" x-text="active.bitrate ?? '-'"></p>
+                  </div>
+                  <div>
+                    <p class="font-mono text-xs tracking-[0.1em] text-outline">ORIGINAL_SIZE</p>
+                    <p class="font-mono text-sm" x-text="fmtSize(active.orig_size)"></p>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- ARCHIVE -->
+      <div class="mt-10">
+        <p class="mb-3 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">COMPLETED_ARCHIVE</p>
+        <div class="panel">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-outline-variant font-mono text-xs tracking-[0.1em] text-outline">
+                <th class="px-6 py-4 text-left">FILENAME</th>
+                <th class="px-6 py-4 text-right">ORIGINAL</th>
+                <th class="px-6 py-4 text-right">COMPRESSED</th>
+                <th class="px-6 py-4 text-right">SAVING</th>
+                <th class="px-6 py-4 text-right"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="job in archive" :key="job.id">
+                <tr class="border-b border-outline-variant last:border-0 align-top">
+                  <td class="px-6 py-4">
+                    <p class="font-mono text-sm" x-text="job.name"></p>
+                    <p x-show="job.error" class="mt-1 max-w-xl whitespace-pre-wrap font-mono text-xs text-error"
+                       x-text="job.error"></p>
+                  </td>
+                  <td class="px-6 py-4 text-right font-mono text-sm text-on-surface-variant"
+                      x-text="fmtSize(job.orig_size)"></td>
+                  <td class="px-6 py-4 text-right font-mono text-sm text-accent"
+                      x-text="job.new_size ? fmtSize(job.new_size) : '-'"></td>
+                  <td class="px-6 py-4 text-right font-mono text-sm"
+                      :class="{ 'text-toxic': job.status === 'done', 'text-outline': job.status === 'skipped', 'text-error': job.status === 'failed' }"
+                      x-text="job.status === 'done' ? `${savingPct(job)}% REDUCTION` : `[ ${job.status.toUpperCase()} ]`"></td>
+                  <td class="px-6 py-4 text-right">
+                    <button x-show="job.status !== 'done'" @click="requeue(job.id)"
+                            class="font-mono text-xs text-outline hover:text-accent">[ RETRY ]</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="!archive.length">
+                <td colspan="5" class="px-6 py-6 font-mono text-sm text-outline">[ NOTHING PROCESSED YET ]</td>
+              </tr>
+            </tbody>
+            <tfoot x-show="totalSaved > 0">
+              <tr class="border-t border-outline-variant">
+                <td colspan="3" class="px-6 py-4 font-mono text-xs tracking-[0.1em] text-outline">TOTAL_RECLAIMED</td>
+                <td colspan="2" class="px-6 py-4 text-right font-mono text-sm text-toxic" x-text="fmtSize(totalSaved)"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
 
   </main>
 </div>
