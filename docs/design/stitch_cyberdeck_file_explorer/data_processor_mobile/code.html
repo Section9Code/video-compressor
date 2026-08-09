@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NEURAL_OS_v4.0 - DATA PROCESSOR</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts (JetBrains Mono & Inter) -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "secondary-container": "#ff24e4",
+                      "on-primary-fixed-variant": "#004f54",
+                      "inverse-surface": "#e5e1e4",
+                      "background": "#131315",
+                      "error": "#ffb4ab",
+                      "primary": "#e1fdff",
+                      "surface-container": "#201f21",
+                      "primary-fixed": "#74f5ff",
+                      "on-tertiary-fixed-variant": "#095300",
+                      "on-surface-variant": "#b9cacb",
+                      "on-tertiary-container": "#106f00",
+                      "on-error": "#690005",
+                      "error-container": "#93000a",
+                      "on-error-container": "#ffdad6",
+                      "on-secondary-container": "#520049",
+                      "surface-variant": "#353437",
+                      "surface": "#131315",
+                      "secondary-fixed": "#ffd7f0",
+                      "surface-container-low": "#1c1b1d",
+                      "outline-variant": "#3a494b",
+                      "primary-container": "#00f2ff",
+                      "secondary-fixed-dim": "#fface8",
+                      "surface-container-lowest": "#0e0e10",
+                      "on-background": "#e5e1e4",
+                      "tertiary-fixed-dim": "#2ae500",
+                      "secondary": "#fface8",
+                      "on-secondary": "#5e0053",
+                      "on-tertiary": "#053900",
+                      "tertiary": "#e4ffd6",
+                      "primary-fixed-dim": "#00dbe7",
+                      "surface-bright": "#39393b",
+                      "surface-tint": "#00dbe7",
+                      "inverse-primary": "#00696f",
+                      "surface-container-highest": "#353437",
+                      "on-tertiary-fixed": "#022100",
+                      "surface-container-high": "#2a2a2c",
+                      "surface-dim": "#131315",
+                      "on-primary": "#00363a",
+                      "on-surface": "#e5e1e4",
+                      "on-primary-fixed": "#002022",
+                      "tertiary-fixed": "#79ff5b",
+                      "on-secondary-fixed-variant": "#840076",
+                      "inverse-on-surface": "#313032",
+                      "tertiary-container": "#34fc0d",
+                      "outline": "#849495",
+                      "on-primary-container": "#006a71",
+                      "on-secondary-fixed": "#3a0033"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit": "4px",
+                      "container-max": "1440px",
+                      "gutter": "16px",
+                      "margin": "24px"
+              },
+              "fontFamily": {
+                      "body-md": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "JetBrains Mono"
+                      ],
+                      "data-mono": [
+                              "JetBrains Mono"
+                      ],
+                      "headline-lg-mobile": [
+                              "Inter"
+                      ],
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "body-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-caps": [
+                              "12px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.1em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "data-mono": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "headline-lg-mobile": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "headline-lg": [
+                              "48px",
+                              {
+                                      "lineHeight": "56px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "body-lg": [
+                              "18px",
+                              {
+                                      "lineHeight": "28px",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+<style>
+        body {
+            background-color: #0a0a0c; /* Deep obsidian as per guidance */
+            color: #e5e1e4;
+        }
+        
+        .cyber-card {
+            background-color: rgba(10, 10, 12, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 242, 255, 0.1);
+        }
+        
+        .cyber-card-active {
+            border: 1px solid #00f2ff;
+            box-shadow: 0 0 15px rgba(0, 242, 255, 0.3);
+        }
+        
+        .progress-stream-segment {
+            width: 4px;
+            height: 12px;
+            background-color: rgba(0, 242, 255, 0.2);
+            margin-right: 2px;
+            display: inline-block;
+        }
+        
+        .progress-stream-segment.filled {
+            background-color: #00f2ff;
+            box-shadow: 0 0 8px rgba(0, 242, 255, 0.8);
+        }
+        
+        .progress-stream-segment.active-pulse {
+            animation: pulse-neon 1s infinite;
+        }
+        
+        @keyframes pulse-neon {
+            0% { opacity: 0.5; box-shadow: 0 0 2px rgba(0, 242, 255, 0.2); }
+            50% { opacity: 1; box-shadow: 0 0 12px rgba(0, 242, 255, 1); }
+            100% { opacity: 0.5; box-shadow: 0 0 2px rgba(0, 242, 255, 0.2); }
+        }
+
+        .scanline-text {
+            position: relative;
+            display: inline-block;
+        }
+        .scanline-text::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: rgba(0, 242, 255, 0.5);
+            animation: scan 2s linear infinite;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        @keyframes scan {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+    </style>
+</head>
+<body class="bg-surface font-body-md text-on-surface antialiased overflow-x-hidden pt-16 pb-24">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full bg-background/70 backdrop-blur-xl border-b border-primary/20 shadow-[0_0_15px_rgba(0,242,255,0.1)] flex justify-between items-center px-margin h-16 w-full z-50">
+<div class="font-headline-md text-headline-md font-bold tracking-tighter text-primary-container">
+            NEURAL_OS_v4.0
+        </div>
+<!-- Navigation Links (Hidden on Mobile) -->
+<nav class="hidden md:flex gap-4">
+<a class="font-data-mono text-data-mono text-on-surface-variant hover:text-primary transition-colors hover:bg-primary/10 px-2 py-1 transition-all duration-300 active:scale-95" href="#">DASHBOARD</a>
+<a class="font-data-mono text-data-mono text-on-surface-variant hover:text-primary transition-colors hover:bg-primary/10 px-2 py-1 transition-all duration-300 active:scale-95" href="#">VAULT</a>
+<a class="font-data-mono text-data-mono text-primary border-b-2 border-primary-container pb-1 px-2 py-1 transition-all duration-300 active:scale-95" href="#">UPLINK</a>
+<a class="font-data-mono text-data-mono text-on-surface-variant hover:text-primary transition-colors hover:bg-primary/10 px-2 py-1 transition-all duration-300 active:scale-95" href="#">TERMINAL</a>
+</nav>
+<div class="flex gap-4">
+<span class="material-symbols-outlined text-on-surface-variant hover:text-primary cursor-pointer transition-colors" data-icon="security">security</span>
+<span class="material-symbols-outlined text-on-surface-variant hover:text-primary cursor-pointer transition-colors" data-icon="sensors">sensors</span>
+<span class="material-symbols-outlined text-on-surface-variant hover:text-primary cursor-pointer transition-colors" data-icon="settings">settings</span>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="px-gutter flex flex-col gap-unit mt-6 max-w-container-max mx-auto">
+<!-- Breadcrumbs -->
+<div class="font-data-mono text-label-caps text-outline-variant mb-4">
+            ROOT / PROCESSOR / <span class="text-primary-container">UPLINK_QUEUE</span>
+</div>
+<!-- ACTIVE_PROCESS Card -->
+<section class="cyber-card cyber-card-active rounded p-4 mb-4 relative overflow-hidden">
+<!-- Subtle background tech pattern -->
+<div class="absolute inset-0 opacity-10 pointer-events-none" style="background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,242,255,0.1) 10px, rgba(0,242,255,0.1) 20px);"></div>
+<div class="flex justify-between items-start mb-4 relative z-10">
+<div>
+<h2 class="font-label-caps text-label-caps text-primary-container flex items-center gap-2 scanline-text">
+<span class="material-symbols-outlined text-[16px]" data-icon="memory" data-weight="fill">memory</span>
+                        [ ACTIVE_PROCESS ]
+                    </h2>
+<div class="font-data-mono text-data-mono text-on-surface mt-2">
+                        SECURE_UPLINK_DATA_V2.enc
+                    </div>
+</div>
+<div class="text-right">
+<span class="font-data-mono text-label-caps text-primary pulse-text animate-pulse">78%</span>
+</div>
+</div>
+<!-- Technical Specs -->
+<div class="flex gap-4 mb-6 relative z-10 border-l border-primary/30 pl-2">
+<div class="flex flex-col">
+<span class="font-label-caps text-[10px] text-outline-variant">RESOLUTION</span>
+<span class="font-data-mono text-data-mono text-on-surface-variant">1080p</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-[10px] text-outline-variant">CODEC</span>
+<span class="font-data-mono text-data-mono text-on-surface-variant">H.265_HEVC</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-[10px] text-outline-variant">THROUGHPUT</span>
+<span class="font-data-mono text-data-mono text-on-surface-variant">42.5 MB/s</span>
+</div>
+</div>
+<!-- Progress Stream -->
+<div class="w-full flex items-center gap-[1px] relative z-10" id="active-progress-stream">
+<!-- Segments will be generated by JS -->
+</div>
+<div class="mt-4 flex justify-end gap-2 relative z-10">
+<button class="bg-primary-container text-on-primary-fixed-variant font-label-caps text-label-caps px-4 py-2 rounded-sm hover:bg-primary-fixed transition-colors">
+                    PAUSE_UPLINK
+                </button>
+</div>
+</section>
+<!-- PENDING Section -->
+<section class="mb-4">
+<h3 class="font-label-caps text-label-caps text-outline-variant mb-2 flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]" data-icon="schedule">schedule</span>
+                [ PENDING_QUEUE ]
+            </h3>
+<div class="flex flex-col gap-[1px]">
+<!-- Pending Item 1 -->
+<div class="cyber-card p-3 flex justify-between items-center group cursor-pointer hover:bg-surface-variant/30 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="file_present">file_present</span>
+<div>
+<div class="font-data-mono text-data-mono text-on-surface">SYS_LOG_ARCHIVE_09.zip</div>
+<div class="font-label-caps text-[10px] text-outline-variant mt-1">SIZE: 1.2 GB | WAITING</div>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline-variant text-[18px]" data-icon="more_vert">more_vert</span>
+</div>
+<!-- Pending Item 2 -->
+<div class="cyber-card p-3 flex justify-between items-center group cursor-pointer hover:bg-surface-variant/30 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="folder_zip">folder_zip</span>
+<div>
+<div class="font-data-mono text-data-mono text-on-surface">CORE_DUMP_VOL4.bin</div>
+<div class="font-label-caps text-[10px] text-outline-variant mt-1">SIZE: 4.8 GB | WAITING</div>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline-variant text-[18px]" data-icon="more_vert">more_vert</span>
+</div>
+</div>
+</section>
+<!-- COMPLETED Section -->
+<section>
+<h3 class="font-label-caps text-label-caps text-tertiary-fixed mb-2 flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]" data-icon="check_circle">check_circle</span>
+                [ COMPLETED_TASKS ]
+            </h3>
+<div class="flex flex-col gap-[1px]">
+<!-- Completed Item 1 -->
+<div class="cyber-card p-3 border-l border-tertiary-fixed/30 bg-surface-container-low/50">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-tertiary-fixed text-[18px]" data-icon="task_alt">task_alt</span>
+<div class="font-data-mono text-data-mono text-on-surface-variant">TELEMETRY_DATA_Q3.csv</div>
+</div>
+<span class="font-label-caps text-[10px] bg-tertiary-fixed/10 text-tertiary-fixed px-1 rounded-sm border border-tertiary-fixed/20">CLEARED</span>
+</div>
+<div class="mt-2 pl-7 flex gap-4">
+<span class="font-data-mono text-[11px] text-outline-variant line-through">ORIGINAL: 450 MB</span>
+<span class="font-data-mono text-[11px] text-tertiary-fixed">OPTIMIZED: 120 MB (73% REDUCTION)</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="bg-surface-container-highest/90 backdrop-blur-lg fixed bottom-0 left-0 w-full z-50 flex justify-around items-center h-20 px-4 lg:hidden pb-safe rounded-t-xl border-t border-primary/30 shadow-[0_-5px_20px_rgba(0,242,255,0.2)]">
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-60 active:bg-primary/20 transition-transform duration-300 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="grid_view">grid_view</span>
+<span class="font-label-caps text-label-caps mt-1">DASHBOARD</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-60 active:bg-primary/20 transition-transform duration-300 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="enhanced_encryption">enhanced_encryption</span>
+<span class="font-label-caps text-label-caps mt-1">VAULT</span>
+</a>
+<a class="flex flex-col items-center justify-center text-primary-container font-bold scale-110 active:bg-primary/20 transition-transform duration-300 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="settings_input_antenna" data-weight="fill">settings_input_antenna</span>
+<span class="font-label-caps text-label-caps mt-1 text-primary-container">UPLINK</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-60 active:bg-primary/20 transition-transform duration-300 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="terminal">terminal</span>
+<span class="font-label-caps text-label-caps mt-1">TERMINAL</span>
+</a>
+</nav>
+<script>
+        // Generate stream segments for progress bar
+        document.addEventListener('DOMContentLoaded', () => {
+            const streamContainer = document.getElementById('active-progress-stream');
+            if (streamContainer) {
+                const totalSegments = 40;
+                const filledSegments = Math.floor(totalSegments * 0.78);
+                
+                for (let i = 0; i < totalSegments; i++) {
+                    const segment = document.createElement('div');
+                    segment.className = 'progress-stream-segment';
+                    
+                    if (i < filledSegments) {
+                        segment.classList.add('filled');
+                    } else if (i === filledSegments) {
+                        segment.classList.add('active-pulse');
+                    }
+                    
+                    streamContainer.appendChild(segment);
+                }
+            }
+        });
+    </script>
+</body></html>

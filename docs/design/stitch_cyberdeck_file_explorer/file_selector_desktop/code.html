@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NEURAL_LINK - File Selector</title>
+<!-- Fonts & Icons -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-primary-fixed": "#002022",
+                    "error-container": "#93000a",
+                    "secondary-fixed-dim": "#fface8",
+                    "primary": "#e1fdff",
+                    "on-primary-container": "#006a71",
+                    "surface": "#131315",
+                    "on-background": "#e5e1e4",
+                    "tertiary-fixed": "#79ff5b",
+                    "surface-container-lowest": "#0e0e10",
+                    "on-tertiary": "#053900",
+                    "on-surface": "#e5e1e4",
+                    "on-secondary-container": "#520049",
+                    "on-primary": "#00363a",
+                    "on-tertiary-fixed": "#022100",
+                    "outline-variant": "#3a494b",
+                    "inverse-on-surface": "#313032",
+                    "tertiary": "#e4ffd6",
+                    "background": "#131315",
+                    "on-secondary": "#5e0053",
+                    "on-tertiary-fixed-variant": "#095300",
+                    "surface-variant": "#353437",
+                    "on-tertiary-container": "#106f00",
+                    "on-error-container": "#ffdad6",
+                    "inverse-surface": "#e5e1e4",
+                    "surface-container-low": "#1c1b1d",
+                    "on-error": "#690005",
+                    "primary-fixed-dim": "#00dbe7",
+                    "on-primary-fixed-variant": "#004f54",
+                    "secondary-container": "#ff24e4",
+                    "surface-bright": "#39393b",
+                    "error": "#ffb4ab",
+                    "inverse-primary": "#00696f",
+                    "tertiary-fixed-dim": "#2ae500",
+                    "surface-dim": "#131315",
+                    "primary-fixed": "#74f5ff",
+                    "tertiary-container": "#34fc0d",
+                    "surface-container": "#201f21",
+                    "outline": "#849495",
+                    "on-secondary-fixed-variant": "#840076",
+                    "secondary": "#fface8",
+                    "on-secondary-fixed": "#3a0033",
+                    "on-surface-variant": "#b9cacb",
+                    "primary-container": "#00f2ff",
+                    "surface-tint": "#00dbe7",
+                    "surface-container-highest": "#353437",
+                    "secondary-fixed": "#ffd7f0",
+                    "surface-container-high": "#2a2a2c"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "margin": "24px",
+                    "container-max": "1440px",
+                    "gutter": "16px",
+                    "unit": "4px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Inter"],
+                    "body-md": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "data-mono": ["JetBrains Mono"],
+                    "headline-lg-mobile": ["Inter"],
+                    "label-caps": ["JetBrains Mono"]
+            },
+            "fontSize": {
+                    "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "700"}],
+                    "headline-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "data-mono": ["14px", {"lineHeight": "20px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "headline-lg-mobile": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.1em", "fontWeight": "700"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        /* Custom Scanline Effect */
+        .scanlines::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 100;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+        }
+        
+        /* Custom Scrollbar for Terminals */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0e0e10; }
+        ::-webkit-scrollbar-thumb { background: #3a494b; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00f2ff; box-shadow: 0 0 10px #00f2ff; }
+
+        /* Holographic Pulse */
+        @keyframes holo-pulse {
+            0% { box-shadow: 0 0 15px rgba(0, 242, 255, 0.4), inset 0 0 10px rgba(0, 242, 255, 0.2); }
+            50% { box-shadow: 0 0 25px rgba(0, 242, 255, 0.8), inset 0 0 20px rgba(0, 242, 255, 0.4); }
+            100% { box-shadow: 0 0 15px rgba(0, 242, 255, 0.4), inset 0 0 10px rgba(0, 242, 255, 0.2); }
+        }
+        .btn-pulse { animation: holo-pulse 2s infinite; }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md overflow-hidden selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<nav class="fixed top-0 w-full z-40 flex justify-between items-center px-margin h-16 bg-surface/70 backdrop-blur-xl border-b border-outline-variant/30 shadow-[0_0_15px_rgba(0,242,255,0.15)] text-primary transition-all duration-300 ease-out lg:pl-[304px]">
+<div class="flex items-center gap-4">
+<!-- Mobile Menu Toggle (Hidden on LG) -->
+<button class="lg:hidden p-2 text-primary hover:text-primary-fixed-dim hover:bg-surface-variant/50 rounded active:scale-95 transition-all">
+<span class="material-symbols-outlined" data-icon="menu">menu</span>
+</button>
+<div class="lg:hidden font-headline-md text-headline-md tracking-tighter text-primary italic">NEURAL_LINK</div>
+</div>
+<div class="flex items-center gap-6">
+<!-- Search Bar (on_right) -->
+<div class="hidden md:flex relative group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant group-focus-within:text-primary-container transition-colors text-sm" data-icon="search">search</span>
+<input class="bg-surface-container-highest/50 border border-outline-variant/50 rounded-full py-1.5 pl-10 pr-4 w-64 text-data-mono font-data-mono text-sm focus:outline-none focus:border-primary-container focus:shadow-[0_0_10px_rgba(0,242,255,0.2)] transition-all placeholder:text-outline placeholder:opacity-50 text-primary" placeholder="QUERY_INDEX..." type="text"/>
+</div>
+<!-- Trailing Icons -->
+<div class="flex items-center gap-2">
+<button class="p-2 text-on-surface-variant hover:text-primary-fixed-dim hover:bg-surface-variant/50 rounded-full active:scale-95 transition-all" title="security">
+<span class="material-symbols-outlined" data-icon="security">security</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-primary-fixed-dim hover:bg-surface-variant/50 rounded-full active:scale-95 transition-all" title="sensors">
+<span class="material-symbols-outlined" data-icon="sensors">sensors</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-primary-fixed-dim hover:bg-surface-variant/50 rounded-full active:scale-95 transition-all" title="settings">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+</div>
+<!-- Profile Avatar -->
+<div class="w-8 h-8 rounded-full border border-primary/30 overflow-hidden shadow-[0_0_8px_rgba(0,242,255,0.2)]">
+<img alt="Hacker Profile Avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAANKWI6BzAYUQVjQmNKNF0yvWtgHOOD0DnOmjcBHG0-BF16GWduPBEYu_5ThX1F5XS28yxjWzGvmVRiLE2IReG6LqpA3m1knucuSeiAyt4S67S-LM-yQBuvFDxFUZHTF8G6ZoOP1ioL3JVLecjnY6lCOwEpWKZiOKxyWZ8-GYPXTcQfKZ8AcRl48fXRSWLWoVCRKxFvjAbXqC0eG3K6jOgmyZydBL9GttUcgfFtA_wwWJalehcEUSw"/>
+</div>
+</div>
+</nav>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-full w-[280px] hidden lg:flex flex-col py-margin gap-unit bg-surface-container-lowest/80 backdrop-blur-lg border-r border-outline-variant/30 shadow-[5px_0_20px_rgba(0,0,0,0.5)] z-50">
+<!-- Header -->
+<div class="px-margin mb-8 flex flex-col gap-4">
+<div class="font-headline-md text-headline-md text-primary font-black tracking-wider">NEURAL_LINK</div>
+<div class="flex items-center gap-3 bg-surface-container/50 p-3 rounded-lg border border-outline-variant/20">
+<div class="w-10 h-10 rounded border border-outline-variant relative overflow-hidden bg-surface">
+<img alt="System Admin" class="w-full h-full object-cover opacity-80 mix-blend-screen" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBibVwCLvWirDu9IMHVjy3auRaZvm-tvdBQgmOPVlk7O3Z4_nhDwIo973WBQCryeKJAf3BAEP_jm5npdHimpPjSqTunrnn5n2HwZVvdNWJolhq-g19WzetyKKCZkYywrqwSJBOPjwv5nYAJ-uW8UWIi8O45hal45Jtdu08lt0VEe1Bgq_9BxNIJnz8P_Y-h-9An2ySMexr6NZOc7pstJwc9MeLokfC6I16fB5-cwD8a-0aaiBvgzozK"/>
+<div class="absolute inset-0 bg-primary-container/10"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-data-mono text-data-mono text-xs text-on-surface">System Admin</span>
+<span class="font-data-mono text-label-caps text-[10px] text-tertiary-fixed mt-1 animate-pulse">[ STATUS: ENCRYPTED ]</span>
+</div>
+</div>
+</div>
+<!-- Primary Navigation -->
+<nav class="flex flex-col gap-1 px-4 flex-1">
+<a class="group transition-colors duration-200 flex items-center gap-3 px-4 py-3 rounded-l-sm text-on-surface-variant hover:bg-primary/5 hover:text-primary-fixed" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="grid_view">grid_view</span>
+<span class="font-data-mono text-data-mono">Dashboard</span>
+</a>
+<a class="group transition-colors duration-200 flex items-center gap-3 px-4 py-3 rounded-l-sm text-on-surface-variant hover:bg-primary/5 hover:text-primary-fixed" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="lock_open">lock_open</span>
+<span class="font-data-mono text-data-mono">Secure Vault</span>
+</a>
+<a class="group transition-colors duration-200 flex items-center gap-3 px-4 py-3 rounded-l-sm text-on-surface-variant hover:bg-primary/5 hover:text-primary-fixed" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="leak_add">leak_add</span>
+<span class="font-data-mono text-data-mono">Uplink Monitor</span>
+</a>
+<!-- Active State -->
+<a class="group transition-colors duration-200 flex items-center gap-3 px-4 py-3 rounded-l-sm text-primary bg-primary/10 border-r-2 border-primary" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="terminal" data-weight="fill">terminal</span>
+<span class="font-data-mono text-data-mono font-bold">File Terminal</span>
+</a>
+</nav>
+<!-- CTA & Footer -->
+<div class="px-margin flex flex-col gap-6 mt-auto">
+<button class="w-full bg-primary/10 border border-primary-container text-primary-container font-label-caps text-label-caps py-3 hover:bg-primary-container hover:text-on-primary-container transition-all uppercase tracking-widest relative overflow-hidden group shadow-[0_0_10px_rgba(0,242,255,0.1)] hover:shadow-[0_0_20px_rgba(0,242,255,0.4)]">
+<span class="relative z-10">INITIATE_UPLINK</span>
+<div class="absolute inset-0 w-0 bg-primary-container transition-all duration-300 ease-out group-hover:w-full"></div>
+</button>
+<div class="flex flex-col gap-1 border-t border-outline-variant/30 pt-4">
+<a class="group transition-colors duration-200 flex items-center gap-3 py-2 text-on-surface-variant hover:text-primary-fixed text-sm" href="#">
+<span class="material-symbols-outlined text-base" data-icon="list_alt">list_alt</span>
+<span class="font-data-mono text-data-mono text-xs">System Logs</span>
+</a>
+<a class="group transition-colors duration-200 flex items-center gap-3 py-2 text-on-surface-variant hover:text-error text-sm" href="#">
+<span class="material-symbols-outlined text-base" data-icon="logout">logout</span>
+<span class="font-data-mono text-data-mono text-xs">Logout</span>
+</a>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas (Dual Pane) -->
+<main class="lg:pl-[280px] pt-16 h-screen flex flex-col bg-background relative z-10 scanlines">
+<div class="flex-1 flex overflow-hidden">
+<!-- Left Pane: Directory Tree -->
+<section class="hidden md:flex flex-col w-72 bg-surface-container-low/50 backdrop-blur-md border-r border-outline-variant/30 overflow-hidden relative">
+<div class="p-4 border-b border-outline-variant/20 flex items-center justify-between">
+<span class="font-data-mono text-label-caps text-on-surface-variant tracking-widest uppercase">Server_Tree</span>
+<span class="material-symbols-outlined text-on-surface-variant text-sm" data-icon="account_tree">account_tree</span>
+</div>
+<div class="flex-1 overflow-y-auto p-2 font-data-mono text-data-mono text-sm pb-24">
+<!-- Root Node -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-2 px-2 py-1.5 text-on-surface hover:bg-surface-variant/30 cursor-pointer rounded">
+<span class="material-symbols-outlined text-lg text-primary" data-icon="folder_open">folder_open</span>
+<span>ROOT</span>
+</div>
+<!-- Level 1 -->
+<div class="ml-4 pl-2 border-l border-outline-variant/30 flex flex-col gap-1 relative">
+<div class="flex items-center gap-2 px-2 py-1.5 text-on-surface hover:bg-surface-variant/30 cursor-pointer rounded">
+<span class="material-symbols-outlined text-lg text-on-surface-variant" data-icon="folder">folder</span>
+<span>SYS_ARCHIVE</span>
+</div>
+<!-- Active/Expanded Node -->
+<div class="flex items-center gap-2 px-2 py-1.5 text-primary-container bg-primary-container/10 border-l-2 border-primary-container -ml-[1px] cursor-pointer rounded-r">
+<span class="material-symbols-outlined text-lg text-primary-container" data-icon="folder_open">folder_open</span>
+<span>VOL_01</span>
+</div>
+<!-- Level 2 -->
+<div class="ml-4 pl-2 border-l border-primary-container/30 flex flex-col gap-1">
+<div class="flex items-center gap-2 px-2 py-1.5 text-on-surface hover:bg-surface-variant/30 cursor-pointer rounded">
+<span class="material-symbols-outlined text-lg text-on-surface-variant" data-icon="folder">folder</span>
+<span>CACHE</span>
+</div>
+<div class="flex items-center gap-2 px-2 py-1.5 text-secondary-fixed-dim bg-secondary-container/5 border-l-2 border-secondary-fixed-dim -ml-[1px] cursor-pointer rounded-r">
+<span class="material-symbols-outlined text-lg" data-icon="folder_open">folder_open</span>
+<span>MEDIA</span>
+</div>
+<!-- Level 3 -->
+<div class="ml-4 pl-2 border-l border-secondary-fixed-dim/30 flex flex-col gap-1">
+<div class="flex items-center gap-2 px-2 py-1.5 text-on-surface hover:bg-surface-variant/30 cursor-pointer rounded">
+<span class="material-symbols-outlined text-lg text-on-surface-variant" data-icon="folder">folder</span>
+<span>PROCESSED</span>
+</div>
+<div class="flex items-center justify-between px-2 py-1.5 text-primary-fixed bg-surface-variant/40 border-l-2 border-primary -ml-[1px] cursor-pointer rounded-r shadow-[inset_0_0_10px_rgba(0,242,255,0.1)]">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-lg" data-icon="video_library">video_library</span>
+<span>RAW_FOOTAGE</span>
+</div>
+<span class="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">4</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Pane: File Browser -->
+<section class="flex-1 flex flex-col bg-surface-container-lowest relative">
+<!-- Toolbar -->
+<div class="p-margin border-b border-outline-variant/20 bg-surface/50 backdrop-blur-md flex flex-col gap-4">
+<!-- Breadcrumbs -->
+<div class="flex items-center gap-2 font-data-mono text-data-mono text-sm">
+<span class="text-on-surface-variant hover:text-primary cursor-pointer transition-colors">ROOT</span>
+<span class="text-outline-variant">/</span>
+<span class="text-on-surface-variant hover:text-primary cursor-pointer transition-colors">VOL_01</span>
+<span class="text-outline-variant">/</span>
+<span class="text-secondary-fixed-dim hover:text-secondary-fixed cursor-pointer transition-colors">MEDIA</span>
+<span class="text-outline-variant">/</span>
+<span class="text-primary font-bold shadow-primary/50 drop-shadow-[0_0_8px_rgba(0,242,255,0.8)]">RAW_FOOTAGE</span>
+</div>
+<!-- Actions -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-4">
+<label class="flex items-center gap-2 cursor-pointer group">
+<div class="relative w-5 h-5 flex items-center justify-center">
+<input class="peer appearance-none w-5 h-5 border border-outline-variant rounded bg-surface/50 checked:bg-primary-container checked:border-primary-container transition-all cursor-pointer" type="checkbox"/>
+<span class="material-symbols-outlined absolute text-on-primary-container text-sm opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" data-icon="check">check</span>
+</div>
+<span class="font-data-mono text-label-caps text-on-surface group-hover:text-primary transition-colors">SELECT_ALL</span>
+</label>
+</div>
+<div class="flex items-center gap-3">
+<div class="relative group">
+<input class="bg-surface-container border-b-2 border-outline-variant border-t-0 border-x-0 py-1 pl-2 pr-8 w-48 text-data-mono font-data-mono text-sm focus:outline-none focus:border-primary-container focus:bg-surface-variant/30 transition-all placeholder:text-outline/50 text-primary" placeholder="FILTER_FILES..." type="text"/>
+<span class="material-symbols-outlined absolute right-1 top-1/2 -translate-y-1/2 text-outline-variant text-sm" data-icon="filter_list">filter_list</span>
+</div>
+<div class="flex bg-surface-container rounded p-1 border border-outline-variant/30">
+<button class="p-1 rounded bg-surface-variant text-primary shadow-[0_0_5px_rgba(0,242,255,0.2)]"><span class="material-symbols-outlined text-sm" data-icon="grid_view">grid_view</span></button>
+<button class="p-1 rounded text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined text-sm" data-icon="view_list">view_list</span></button>
+</div>
+</div>
+</div>
+</div>
+<!-- File Grid -->
+<div class="flex-1 overflow-y-auto p-margin pb-32">
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+<!-- File Card 1 (Selected) -->
+<div class="bg-surface-container-high/60 backdrop-blur-sm border border-primary-container rounded-lg overflow-hidden relative group shadow-[0_0_15px_rgba(0,242,255,0.15)]">
+<div class="absolute top-2 right-2 z-20 w-5 h-5 flex items-center justify-center">
+<input checked="" class="peer appearance-none w-5 h-5 border border-primary-container rounded bg-primary-container/20 checked:bg-primary-container checked:border-primary-container transition-all cursor-pointer" type="checkbox"/>
+<span class="material-symbols-outlined absolute text-on-primary-container text-sm opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" data-icon="check">check</span>
+</div>
+<div class="h-32 w-full relative overflow-hidden bg-surface-lowest">
+<img class="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-500 mix-blend-luminosity" data-alt="A high-tech cyberpunk surveillance feed displaying a dark alleyway illuminated by stark neon cyan lights. Static distortion and glowing digital overlays obscure parts of the image. The mood is tense and deeply atmospheric, adhering to a dark mode aesthetic with high contrast." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBQvBCzWtDTbVle3BevXe8KNC6CURZl35CxZw2l9qcb1xfMwxXTjFJEk80S0yw4yP9NDLRj_SjPJsT_mcFj9LNTTmHdx_8nySRfhNbIMwPVRJYcZp0K1nsy25WqJRm7YJS5Pn_Q4xnUzRWKEQGxbm79qpAYJLWLfOQv1FZBZoZK2_aHjfZkcIDg7uhSOaadv0fAbiNEzKQcNXQKeQB_f0RaxcmD9sBD7U5LGqyUjEymDSs0dkyuAZO_"/>
+<div class="absolute inset-0 bg-gradient-to-t from-surface-container-highest to-transparent"></div>
+<div class="absolute bottom-2 right-2 bg-surface/80 px-2 py-0.5 rounded font-data-mono text-[10px] text-primary border border-primary/30 backdrop-blur-sm">00:45:12</div>
+</div>
+<div class="p-3 flex flex-col gap-1">
+<div class="font-data-mono text-data-mono text-primary font-bold truncate" title="cam_01_sector_7G.mp4">cam_01_sector_7G.mp4</div>
+<div class="flex justify-between items-center mt-2">
+<span class="font-data-mono text-label-caps text-on-surface-variant">1.4 GB</span>
+<span class="material-symbols-outlined text-primary-container text-sm" data-icon="play_circle">play_circle</span>
+</div>
+</div>
+</div>
+<!-- File Card 2 -->
+<div class="bg-surface-container-low/80 backdrop-blur-sm border border-outline-variant/30 hover:border-primary/50 rounded-lg overflow-hidden relative group transition-colors">
+<div class="absolute top-2 right-2 z-20 w-5 h-5 flex items-center justify-center">
+<input class="peer appearance-none w-5 h-5 border border-outline-variant rounded bg-surface/50 checked:bg-primary-container checked:border-primary-container transition-all cursor-pointer hover:border-primary" type="checkbox"/>
+<span class="material-symbols-outlined absolute text-on-primary-container text-sm opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" data-icon="check">check</span>
+</div>
+<div class="h-32 w-full relative overflow-hidden bg-surface-lowest">
+<img class="w-full h-full object-cover opacity-60 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500 grayscale group-hover:grayscale-0" data-alt="An abstract visualization of digital data streams resembling corrupted video files. Glitching blocky patterns in deep magentas and toxic greens against an obsidian black background. The visual style is aggressive, technical, and firmly rooted in a brutalist cyberpunk aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuATKYSGwADcQb8J_ppkZ7JHKyHhB0nISmTvdRRvMO6mryzzEiIXPK5NnJUuxeRB1VYWxUgT04J-lNovfBly4S_83ilT7V-muxTdx4hsiOAwew-wcdmHQiDSjfKW3u3LaC3Z8AXKzXVnwMKNipXUIaOz3tbU85K5wL3kGSvvF0sOlLBWCDroVh_qA9KJ8pbpNK9FdJXUHvc9fUxv-wZG-PMr52W4-74xhlrIOIKKdNswUGu4Zl43HUTV"/>
+<div class="absolute inset-0 bg-gradient-to-t from-surface-container-highest to-transparent"></div>
+<div class="absolute bottom-2 right-2 bg-surface/80 px-2 py-0.5 rounded font-data-mono text-[10px] text-on-surface border border-outline-variant/50 backdrop-blur-sm">02:11:04</div>
+</div>
+<div class="p-3 flex flex-col gap-1">
+<div class="font-data-mono text-data-mono text-on-surface truncate group-hover:text-primary transition-colors" title="drone_sweep_ext_04.mp4">drone_sweep_ext_04.mp4</div>
+<div class="flex justify-between items-center mt-2">
+<span class="font-data-mono text-label-caps text-on-surface-variant">4.2 GB</span>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors text-sm" data-icon="play_circle">play_circle</span>
+</div>
+</div>
+</div>
+<!-- File Card 3 -->
+<div class="bg-surface-container-low/80 backdrop-blur-sm border border-outline-variant/30 hover:border-primary/50 rounded-lg overflow-hidden relative group transition-colors">
+<div class="absolute top-2 right-2 z-20 w-5 h-5 flex items-center justify-center">
+<input class="peer appearance-none w-5 h-5 border border-outline-variant rounded bg-surface/50 checked:bg-primary-container checked:border-primary-container transition-all cursor-pointer hover:border-primary" type="checkbox"/>
+<span class="material-symbols-outlined absolute text-on-primary-container text-sm opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" data-icon="check">check</span>
+</div>
+<div class="h-32 w-full relative overflow-hidden bg-surface-lowest">
+<div class="w-full h-full bg-surface-variant/20 flex flex-col items-center justify-center text-outline-variant">
+<span class="material-symbols-outlined text-4xl mb-2 opacity-50" data-icon="movie">movie</span>
+<span class="font-data-mono text-[10px] tracking-widest uppercase">Corrupted_Header</span>
+</div>
+<div class="absolute inset-0 bg-gradient-to-t from-surface-container-highest to-transparent"></div>
+<div class="absolute bottom-2 right-2 bg-surface/80 px-2 py-0.5 rounded font-data-mono text-[10px] text-error border border-error/30 backdrop-blur-sm">ERR: UNKNOWN</div>
+</div>
+<div class="p-3 flex flex-col gap-1">
+<div class="font-data-mono text-data-mono text-on-surface truncate group-hover:text-primary transition-colors line-through opacity-70" title="intercept_dat_091.raw">intercept_dat_091.raw</div>
+<div class="flex justify-between items-center mt-2">
+<span class="font-data-mono text-label-caps text-on-surface-variant">890 MB</span>
+<span class="material-symbols-outlined text-error text-sm" data-icon="warning">warning</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Action Bar (Floating at bottom of right pane) -->
+<div class="absolute bottom-0 left-0 w-full p-4 bg-surface-container-highest/90 backdrop-blur-xl border-t border-outline-variant/30 flex justify-between items-center z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+<div class="flex flex-col">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-primary-container animate-pulse shadow-[0_0_8px_#00f2ff]"></div>
+<span class="font-data-mono text-data-mono text-primary font-bold">1 FILE SELECTED</span>
+</div>
+<span class="font-data-mono text-label-caps text-on-surface-variant mt-1">TOTAL_SIZE: 1.4 GB / PIPELINE_CAPACITY: OK</span>
+</div>
+<button class="btn-pulse bg-primary-container text-on-primary-container font-label-caps text-label-caps px-8 py-3 rounded-sm uppercase tracking-widest font-bold hover:bg-primary-fixed transition-all relative overflow-hidden group flex items-center gap-2">
+<span class="material-symbols-outlined text-lg" data-icon="add_to_queue">add_to_queue</span>
+<span class="relative z-10">ADD TO PIPELINE</span>
+<div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+</button>
+</div>
+</section>
+</div>
+</main>
+</body></html>

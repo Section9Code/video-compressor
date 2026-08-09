@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>NEURAL_OS_v4.0 - Data Processor</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-container": "#ff24e4",
+                        "on-primary-fixed-variant": "#004f54",
+                        "inverse-surface": "#e5e1e4",
+                        "background": "#131315",
+                        "error": "#ffb4ab",
+                        "primary": "#e1fdff",
+                        "surface-container": "#201f21",
+                        "primary-fixed": "#74f5ff",
+                        "on-tertiary-fixed-variant": "#095300",
+                        "on-surface-variant": "#b9cacb",
+                        "on-tertiary-container": "#106f00",
+                        "on-error": "#690005",
+                        "error-container": "#93000a",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-container": "#520049",
+                        "surface-variant": "#353437",
+                        "surface": "#131315",
+                        "secondary-fixed": "#ffd7f0",
+                        "surface-container-low": "#1c1b1d",
+                        "outline-variant": "#3a494b",
+                        "primary-container": "#00f2ff",
+                        "secondary-fixed-dim": "#fface8",
+                        "surface-container-lowest": "#0e0e10",
+                        "on-background": "#e5e1e4",
+                        "tertiary-fixed-dim": "#2ae500",
+                        "secondary": "#fface8",
+                        "on-secondary": "#5e0053",
+                        "on-tertiary": "#053900",
+                        "tertiary": "#e4ffd6",
+                        "primary-fixed-dim": "#00dbe7",
+                        "surface-bright": "#39393b",
+                        "surface-tint": "#00dbe7",
+                        "inverse-primary": "#00696f",
+                        "surface-container-highest": "#353437",
+                        "on-tertiary-fixed": "#022100",
+                        "surface-container-high": "#2a2a2c",
+                        "surface-dim": "#131315",
+                        "on-primary": "#00363a",
+                        "on-surface": "#e5e1e4",
+                        "on-primary-fixed": "#002022",
+                        "tertiary-fixed": "#79ff5b",
+                        "on-secondary-fixed-variant": "#840076",
+                        "inverse-on-surface": "#313032",
+                        "tertiary-container": "#34fc0d",
+                        "outline": "#849495",
+                        "on-primary-container": "#006a71",
+                        "on-secondary-fixed": "#3a0033"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit": "4px",
+                        "container-max": "1440px",
+                        "gutter": "16px",
+                        "margin": "24px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Inter"],
+                        "label-caps": ["JetBrains Mono"],
+                        "data-mono": ["JetBrains Mono"],
+                        "headline-lg-mobile": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "headline-lg": ["Inter"],
+                        "body-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.1em", "fontWeight": "700" }],
+                        "data-mono": ["14px", { "lineHeight": "20px", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "headline-lg-mobile": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "700" }],
+                        "headline-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #0a0a0c; color: #e5e1e4; overflow-x: hidden; }
+        .glass-panel { background: rgba(10, 10, 12, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(0, 242, 255, 0.2); }
+        .glow-active { box-shadow: 0 0 15px rgba(0, 242, 255, 0.3); border-color: #00f2ff; }
+        .glow-success { box-shadow: 0 0 15px rgba(52, 252, 13, 0.2); border-color: #34fc0d; }
+        .progress-bar-segment { background-color: #3a494b; height: 100%; border-right: 1px solid #131315; }
+        .progress-bar-segment.filled { background-color: #00dbe7; box-shadow: 0 0 5px #00f2ff; }
+        
+        /* Scanline animation */
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+        .scanline-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(to bottom, transparent 50%, rgba(0, 242, 255, 0.05) 51%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        /* Glitch effect for active elements */
+        @keyframes glitch {
+            0% { clip-path: inset(10% 0 80% 0); transform: translate(-2px, 2px); }
+            20% { clip-path: inset(80% 0 1% 0); transform: translate(2px, -2px); }
+            40% { clip-path: inset(40% 0 40% 0); transform: translate(-2px, 2px); }
+            60% { clip-path: inset(20% 0 60% 0); transform: translate(2px, -2px); }
+            80% { clip-path: inset(90% 0 5% 0); transform: translate(-2px, 2px); }
+            100% { clip-path: inset(30% 0 50% 0); transform: translate(2px, -2px); }
+        }
+        .glitch-hover:hover .glitch-text::before {
+            content: attr(data-text);
+            position: absolute;
+            left: -2px;
+            text-shadow: 1px 0 #ff24e4;
+            top: 0;
+            color: #e1fdff;
+            background: transparent;
+            overflow: hidden;
+            animation: glitch 0.3s cubic-bezier(.25, .46, .45, .94) both infinite;
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md selection:bg-primary-container selection:text-on-primary-container">
+<div class="scanline-overlay"></div>
+<!-- Main Layout Container -->
+<div class="flex h-screen overflow-hidden">
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-screen w-[280px] bg-surface-container-lowest/80 backdrop-blur-xl border-r border-primary/20 shadow-[5px_0_15px_rgba(0,242,255,0.05)] flex flex-col py-margin z-40 hidden lg:flex">
+<!-- Header -->
+<div class="px-margin mb-8 flex items-center space-x-4">
+<div class="w-12 h-12 rounded-full border border-primary/50 overflow-hidden relative">
+<img alt="SYSTEM_OPERATOR_01" class="object-cover w-full h-full" data-alt="A highly detailed close-up of a futuristic cybernetic eye implant glowing with neon cyan light in a dark, gritty cyberpunk environment, representing a system operator avatar. The lighting is high contrast with deep blacks." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDNREUI4NLkrmj0v-EmTKebtjdxKrFnyDHlAdCtDoDnTIj5VRK1qStJtj38jmq5keK5bj3bkJCxG87DY-jD7gNuAuFfXEYTFNyvnHeFwZm8bb0FOOgha2K6MbhtNVgifC77kIFo0WgC2fj1msEPkSL4D8QEjgNJTAfBdxcRrIB0ua6ndY0Gz60i54x8UdGUO0UdCqjLUMaRWTM25PUMJOHosFORStyZ316NOijGD9UeTC7CKnyL7fhA"/>
+</div>
+<div>
+<h2 class="font-headline-md text-headline-md text-primary">NODE_01</h2>
+<p class="font-data-mono text-data-mono text-outline text-xs">STATUS: ENCRYPTED</p>
+</div>
+</div>
+<!-- Navigation Tabs -->
+<nav class="flex-1 px-4 space-y-2">
+<a class="flex items-center space-x-3 px-4 py-3 rounded text-outline-variant hover:text-primary hover:bg-surface-variant/50 hover:glow-primary transition-all hover:translate-x-1 duration-200" href="#">
+<span class="material-symbols-outlined font-data-mono">grid_view</span>
+<span class="font-label-caps text-label-caps">DASHBOARD</span>
+</a>
+<a class="flex items-center space-x-3 px-4 py-3 rounded text-outline-variant hover:text-primary hover:bg-surface-variant/50 hover:glow-primary transition-all hover:translate-x-1 duration-200" href="#">
+<span class="material-symbols-outlined font-data-mono">enhanced_encryption</span>
+<span class="font-label-caps text-label-caps">SECURE_VAULT</span>
+</a>
+<a class="flex items-center space-x-3 px-4 py-3 rounded bg-primary/10 text-primary-container border-l-4 border-primary-container hover:glow-primary transition-all hover:translate-x-1 duration-200 glitch-hover" href="#">
+<span class="material-symbols-outlined font-data-mono text-primary-container">settings_input_antenna</span>
+<span class="font-label-caps text-label-caps glitch-text" data-text="ACTIVE_UPLINK">ACTIVE_UPLINK</span>
+</a>
+<a class="flex items-center space-x-3 px-4 py-3 rounded text-outline-variant hover:text-primary hover:bg-surface-variant/50 hover:glow-primary transition-all hover:translate-x-1 duration-200" href="#">
+<span class="material-symbols-outlined font-data-mono">terminal</span>
+<span class="font-label-caps text-label-caps">FILE_TERMINAL</span>
+</a>
+</nav>
+<!-- CTA & Footer -->
+<div class="px-margin mt-auto space-y-6">
+<button class="w-full bg-primary-container text-on-primary-container font-label-caps text-label-caps py-3 rounded hover:bg-primary-fixed transition-colors shadow-[0_0_10px_rgba(0,242,255,0.4)]">
+                    INITIALIZE_UPLINK
+                </button>
+<div class="pt-4 border-t border-primary/20 flex justify-between">
+<button class="text-outline-variant hover:text-primary transition-colors flex flex-col items-center">
+<span class="material-symbols-outlined font-data-mono">logout</span>
+<span class="font-label-caps text-label-caps text-[10px] mt-1">LOGOUT</span>
+</button>
+<button class="text-outline-variant hover:text-primary transition-colors flex flex-col items-center">
+<span class="material-symbols-outlined font-data-mono">restart_alt</span>
+<span class="font-label-caps text-label-caps text-[10px] mt-1">SYSTEM_REBOOT</span>
+</button>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col lg:ml-[280px] relative z-10 w-full overflow-y-auto">
+<!-- TopAppBar (Mobile only for Nav, kept structural for Header) -->
+<header class="bg-background/70 backdrop-blur-xl fixed top-0 w-full lg:w-[calc(100%-280px)] border-b border-primary/20 shadow-[0_0_15px_rgba(0,242,255,0.1)] flex justify-between items-center px-margin h-16 z-50">
+<div class="font-headline-md text-headline-md font-bold tracking-tighter text-primary-container">
+                    NEURAL_OS_v4.0
+                </div>
+<div class="flex items-center space-x-4">
+<button class="text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-all duration-300 active:scale-95 p-2 rounded">
+<span class="material-symbols-outlined font-data-mono">security</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-all duration-300 active:scale-95 p-2 rounded">
+<span class="material-symbols-outlined font-data-mono">sensors</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-all duration-300 active:scale-95 p-2 rounded">
+<span class="material-symbols-outlined font-data-mono">settings</span>
+</button>
+</div>
+</header>
+<!-- Dashboard Content -->
+<div class="pt-24 px-4 lg:px-8 pb-32 max-w-container-max mx-auto w-full flex-1">
+<!-- Page Header -->
+<div class="mb-8 flex justify-between items-end border-b border-primary/30 pb-4">
+<div>
+<h1 class="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-primary tracking-tight">DATA_PROCESSOR <span class="text-outline-variant font-light">//</span> VIDEO_ENCODE_V4</h1>
+</div>
+<div class="flex items-center space-x-2 bg-surface-container-low px-3 py-1 rounded border border-primary-container/50">
+<div class="w-2 h-2 rounded-full bg-primary-container animate-pulse shadow-[0_0_5px_#00f2ff]"></div>
+<span class="font-data-mono text-data-mono text-primary-container text-xs tracking-widest">[ACTIVE]</span>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 xl:grid-cols-12 gap-gutter">
+<!-- PENDING_QUEUE (Left Column) -->
+<section class="xl:col-span-4 flex flex-col gap-unit">
+<div class="flex items-center space-x-2 mb-2">
+<span class="material-symbols-outlined font-data-mono text-outline-variant text-sm">schedule</span>
+<h3 class="font-label-caps text-label-caps text-on-surface">PENDING_QUEUE</h3>
+</div>
+<div class="glass-panel p-4 rounded-lg flex flex-col gap-3">
+<!-- Queue Item 1 -->
+<div class="flex justify-between items-center border-b border-surface-variant pb-2">
+<div class="flex flex-col">
+<span class="font-data-mono text-data-mono text-primary text-sm">surveillance_feed_08.mp4</span>
+<span class="font-data-mono text-data-mono text-outline text-xs">4.2 GB | 3840x2160</span>
+</div>
+<span class="material-symbols-outlined font-data-mono text-outline-variant">hourglass_empty</span>
+</div>
+<!-- Queue Item 2 -->
+<div class="flex justify-between items-center border-b border-surface-variant pb-2">
+<div class="flex flex-col">
+<span class="font-data-mono text-data-mono text-primary text-sm">encrypted_payload_A.mkv</span>
+<span class="font-data-mono text-data-mono text-outline text-xs">1.8 GB | 1920x1080</span>
+</div>
+<span class="material-symbols-outlined font-data-mono text-outline-variant">hourglass_empty</span>
+</div>
+<!-- Queue Item 3 -->
+<div class="flex justify-between items-center">
+<div class="flex flex-col">
+<span class="font-data-mono text-data-mono text-primary text-sm">drone_recon_alpha.mov</span>
+<span class="font-data-mono text-data-mono text-outline text-xs">8.5 GB | 7680x4320</span>
+</div>
+<span class="material-symbols-outlined font-data-mono text-outline-variant">hourglass_empty</span>
+</div>
+</div>
+</section>
+<!-- ACTIVE_PROCESS (Center/Right Column - Hero) -->
+<section class="xl:col-span-8 flex flex-col gap-unit h-full">
+<div class="flex items-center space-x-2 mb-2">
+<span class="material-symbols-outlined font-data-mono text-primary-container text-sm animate-pulse">memory</span>
+<h3 class="font-label-caps text-label-caps text-primary-container">ACTIVE_PROCESS</h3>
+</div>
+<div class="glass-panel glow-active p-8 rounded-lg flex-1 flex flex-col relative overflow-hidden">
+<!-- Background decoration -->
+<div class="absolute right-0 top-0 opacity-10 pointer-events-none w-1/2 h-full">
+<!-- Abstract geometric lines to represent data processing -->
+<svg height="100%" preserveaspectratio="none" viewbox="0 0 100 100" width="100%">
+<path d="M10,0 L90,100 M20,0 L100,100 M30,0 L100,80" fill="none" stroke="#00f2ff" stroke-width="0.5"></path>
+</svg>
+</div>
+<div class="flex justify-between items-start mb-8 relative z-10">
+<div>
+<h4 class="font-data-mono text-data-mono text-xl text-primary font-bold mb-1">core_system_backup.mp4</h4>
+<p class="font-data-mono text-data-mono text-outline-variant text-sm">ENCODING: H.265 / HEVC | 3840x2160</p>
+</div>
+<div class="text-right">
+<div class="font-headline-lg text-headline-lg text-primary-container tracking-tighter">68%</div>
+<div class="font-label-caps text-label-caps text-primary text-xs animate-pulse">PROCESSING...</div>
+</div>
+</div>
+<!-- Segmented Progress Bar -->
+<div class="w-full h-8 bg-surface-container-lowest border border-primary/30 flex p-1 gap-1 mb-8">
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[5%]"></div>
+<div class="progress-bar-segment filled w-[3%] animate-pulse"></div> <!-- Current segment -->
+<div class="progress-bar-segment flex-1"></div>
+</div>
+<div class="grid grid-cols-3 gap-4 mt-auto border-t border-primary/20 pt-4">
+<div>
+<p class="font-label-caps text-label-caps text-outline text-[10px]">TIME REMAINING</p>
+<p class="font-data-mono text-data-mono text-primary">00:14:22</p>
+</div>
+<div>
+<p class="font-label-caps text-label-caps text-outline text-[10px]">CURRENT BITRATE</p>
+<p class="font-data-mono text-data-mono text-primary">12.5 Mbps</p>
+</div>
+<div>
+<p class="font-label-caps text-label-caps text-outline text-[10px]">CPU USAGE</p>
+<p class="font-data-mono text-data-mono text-error">94% [CRITICAL]</p>
+</div>
+</div>
+</div>
+</section>
+<!-- COMPLETED_ARCHIVE (Full Width Bottom) -->
+<section class="xl:col-span-12 flex flex-col gap-unit mt-6">
+<div class="flex items-center space-x-2 mb-2">
+<span class="material-symbols-outlined font-data-mono text-tertiary-container text-sm">inventory_2</span>
+<h3 class="font-label-caps text-label-caps text-tertiary-container">COMPLETED_ARCHIVE</h3>
+</div>
+<div class="glass-panel p-4 rounded-lg">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-primary/20">
+<th class="font-label-caps text-label-caps text-outline-variant py-2 font-normal">FILENAME</th>
+<th class="font-label-caps text-label-caps text-outline-variant py-2 font-normal">ORIGINAL</th>
+<th class="font-label-caps text-label-caps text-outline-variant py-2 font-normal">COMPRESSED</th>
+<th class="font-label-caps text-label-caps text-outline-variant py-2 font-normal text-right">SAVING</th>
+</tr>
+</thead>
+<tbody class="font-data-mono text-data-mono text-sm">
+<tr class="border-b border-surface-variant/50 hover:bg-primary/5 transition-colors">
+<td class="py-3 text-primary">sector_7_logs_Q3.mp4</td>
+<td class="py-3 text-outline">4.5 GB</td>
+<td class="py-3 text-primary-container">1.2 GB</td>
+<td class="py-3 text-tertiary-container text-right">73% REDUCTION</td>
+</tr>
+<tr class="border-b border-surface-variant/50 hover:bg-primary/5 transition-colors">
+<td class="py-3 text-primary">neural_net_training_v2.mkv</td>
+<td class="py-3 text-outline">12.0 GB</td>
+<td class="py-3 text-primary-container">4.1 GB</td>
+<td class="py-3 text-tertiary-container text-right">65% REDUCTION</td>
+</tr>
+<tr class="hover:bg-primary/5 transition-colors">
+<td class="py-3 text-primary">audio_intercept_raw.wav</td>
+<td class="py-3 text-outline">850 MB</td>
+<td class="py-3 text-primary-container">120 MB</td>
+<td class="py-3 text-tertiary-container text-right">85% REDUCTION</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+</div>
+</div>
+</main>
+<!-- BottomNavBar (Mobile only) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center h-20 px-4 lg:hidden pb-safe bg-surface-container-highest/90 backdrop-blur-lg border-t border-primary/30 shadow-[0_-5px_20px_rgba(0,242,255,0.2)] rounded-t-xl">
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-60 active:bg-primary/20 transition-transform duration-300 ease-out py-2 px-4 rounded" href="#">
+<span class="material-symbols-outlined font-data-mono mb-1">grid_view</span>
+<span class="font-label-caps text-label-caps text-[10px]">DASHBOARD</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-60 active:bg-primary/20 transition-transform duration-300 ease-out py-2 px-4 rounded" href="#">
+<span class="material-symbols-outlined font-data-mono mb-1">enhanced_encryption</span>
+<span class="font-label-caps text-label-caps text-[10px]">VAULT</span>
+</a>
+<a class="flex flex-col items-center justify-center text-primary-container font-bold scale-110 active:bg-primary/20 transition-transform duration-300 ease-out py-2 px-4 rounded" href="#">
+<span class="material-symbols-outlined font-data-mono mb-1" style="font-variation-settings: 'FILL' 1;">settings_input_antenna</span>
+<span class="font-label-caps text-label-caps text-[10px]">UPLINK</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-60 active:bg-primary/20 transition-transform duration-300 ease-out py-2 px-4 rounded" href="#">
+<span class="material-symbols-outlined font-data-mono mb-1">terminal</span>
+<span class="font-label-caps text-label-caps text-[10px]">TERMINAL</span>
+</a>
+</nav>
+</div>
+</body></html>
