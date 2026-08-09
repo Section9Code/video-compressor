@@ -4,3 +4,4 @@ public/alpine.js
 data/
 *.db
 .superpowers/
+.env
