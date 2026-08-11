@@ -52,13 +52,18 @@
       <div class="w-[320px] shrink-0 overflow-y-auto border-r border-outline-variant p-4">
         <p class="mb-4 font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">SERVER_TREE</p>
         <template x-for="node in tree" :key="node.path">
-          <button @click="scanDir(node.path)"
-                  class="block w-full truncate px-2 py-2 text-left font-mono text-sm"
-                  :style="`padding-left: ${node.depth * 14 + 8}px`"
-                  :class="scanPath === node.path ? 'bg-surface-container text-accent border-l-2 border-accent' : 'text-on-surface-variant hover:text-on-surface'">
-            <span x-text="node.open ? '▾' : '▸'" class="mr-1 text-outline"></span>
-            <span x-text="node.name"></span>
-          </button>
+          <div class="flex w-full items-center font-mono text-sm"
+               :style="`padding-left: ${node.depth * 14 + 8}px`"
+               :class="scanPath === node.path ? 'bg-surface-container text-accent border-l-2 border-accent' : 'text-on-surface-variant hover:text-on-surface'">
+            <button @click="toggleDir(node.path)"
+                    class="shrink-0 px-1 py-2 text-outline hover:text-accent"
+                    :aria-expanded="node.open"
+                    :aria-label="`${node.open ? 'Collapse' : 'Expand'} ${node.name}`"
+                    x-text="node.open ? '▾' : '▸'"></button>
+            <button @click="scanDir(node.path)"
+                    class="min-w-0 flex-1 truncate py-2 text-left"
+                    x-text="node.name"></button>
+          </div>
         </template>
       </div>
 

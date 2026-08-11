@@ -46,21 +46,51 @@ function app() {
     },
 
     // Lazily expand in place, so a deep tree is never walked up front.
+    // The tree is a flat array; a node's descendants are the contiguous run of
+    // deeper nodes that follow it, ending at its next sibling or the array end.
+    collapseAt(i) {
+      const node = this.tree[i];
+      let end = i + 1;
+      while (end < this.tree.length && this.tree[end].depth > node.depth) end++;
+      this.tree.splice(i + 1, end - i - 1);
+      node.open = false;
+    },
+
+    async expandAt(i) {
+      const node = this.tree[i];
+      // Flip open synchronously before the await: a second click on the same
+      // node while this request is in flight then sees open === true and is
+      // a no-op, instead of racing a duplicate splice at a stale index.
+      node.open = true;
+      try {
+        const children = await this.loadDirs(node.path, node.depth + 1);
+        this.tree.splice(i + 1, 0, ...children);
+      } catch (err) {
+        node.open = false;
+        this.error = err.message;
+        throw err;
+      }
+    },
+
+    // The chevron's own control. It cannot share the name's handler: the root
+    // node starts open, and clicking its name is the only way to scan the root
+    // directory — so one handler cannot mean both "scan this" and "collapse this".
+    async toggleDir(p) {
+      this.error = null;
+      const i = this.tree.findIndex((n) => n.path === p);
+      if (i === -1) return;
+      if (this.tree[i].open) this.collapseAt(i);
+      else await this.expandAt(i).catch(() => {});
+    },
+
     async scanDir(p) {
       this.error = null;
       const i = this.tree.findIndex((n) => n.path === p);
       const node = this.tree[i];
       if (node && !node.open) {
-        // Flip open synchronously before the await: a second click on the same
-        // node while this request is in flight then sees open === true and is
-        // a no-op, instead of racing a duplicate splice at a stale index.
-        node.open = true;
         try {
-          const children = await this.loadDirs(p, node.depth + 1);
-          this.tree.splice(i + 1, 0, ...children);
-        } catch (err) {
-          node.open = false;
-          this.error = err.message;
+          await this.expandAt(i);
+        } catch {
           return;
         }
       }

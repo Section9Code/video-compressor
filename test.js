@@ -1332,3 +1332,109 @@ describe('startWorker', () => {
     assert.ok(calls >= 2, 'the loop must survive the throw and keep iterating');
   });
 });
+
+// The frontend ships no unit tests by plan decision, because it is markup plus a
+// thin fetch layer. The tree is the exception: expand/collapse is a loop over a
+// flattened array with a depth invariant, and it shipped broken (no collapse path
+// at all) precisely because nothing re-checked it. Loading the real public/app.js
+// against a stubbed fetch needs no browser and no dependency.
+function loadComponent(dirs = {}) {
+  const src = fs.readFileSync(new URL('./public/app.js', import.meta.url), 'utf8');
+  const previous = { location: globalThis.location, fetch: globalThis.fetch };
+
+  globalThis.location = { hash: '' };
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(url, 'http://test');
+    const p = decodeURIComponent(parsed.searchParams.get('path') ?? '');
+    if (parsed.pathname === '/api/browse') return { ok: true, json: async () => ({ dirs: dirs[p] ?? [] }) };
+    if (parsed.pathname === '/api/scan') return { ok: true, json: async () => ({ files: [] }) };
+    return { ok: true, json: async () => ({}) };
+  };
+
+  const component = new Function(`${src}; return app;`)()();
+  component.settings = { targetShortSide: 720 };
+  component.restore = () => Object.assign(globalThis, previous);
+  return component;
+}
+
+describe('directory tree expand/collapse', () => {
+  const DIRS = {
+    '': [{ path: 'movies', name: 'movies' }, { path: 'tv', name: 'tv' }],
+    movies: [{ path: 'movies/action', name: 'action' }],
+    'movies/action': [{ path: 'movies/action/2024', name: '2024' }],
+  };
+
+  const names = (c) => c.tree.map((n) => n.name);
+
+  async function mounted() {
+    const c = loadComponent(DIRS);
+    c.tree = [{ path: '', name: 'ROOT', depth: 0, open: true }, ...(await c.loadDirs('', 1))];
+    return c;
+  }
+
+  test('toggleDir collapses an open node and removes its descendants', async () => {
+    const c = await mounted();
+    try {
+      await c.scanDir('movies');
+      assert.deepEqual(names(c), ['ROOT', 'movies', 'action', 'tv']);
+      assert.equal(c.tree[1].open, true);
+
+      await c.toggleDir('movies');
+      assert.deepEqual(names(c), ['ROOT', 'movies', 'tv'], 'children must be removed');
+      assert.equal(c.tree[1].open, false, 'the chevron reads from this');
+    } finally {
+      c.restore();
+    }
+  });
+
+  test('collapsing removes every depth of descendant, not just the first', async () => {
+    const c = await mounted();
+    try {
+      await c.scanDir('movies');
+      await c.scanDir('movies/action');
+      assert.deepEqual(names(c), ['ROOT', 'movies', 'action', '2024', 'tv']);
+
+      await c.toggleDir('movies');
+      assert.deepEqual(names(c), ['ROOT', 'movies', 'tv'], 'grandchildren must go too');
+    } finally {
+      c.restore();
+    }
+  });
+
+  test('collapsing stops at the first sibling, leaving later nodes intact', async () => {
+    const c = await mounted();
+    try {
+      await c.scanDir('movies');
+      await c.toggleDir('movies');
+      assert.ok(names(c).includes('tv'), 'the sibling after the subtree must survive');
+    } finally {
+      c.restore();
+    }
+  });
+
+  test('toggleDir re-expands a collapsed node', async () => {
+    const c = await mounted();
+    try {
+      await c.scanDir('movies');
+      await c.toggleDir('movies');
+      await c.toggleDir('movies');
+      assert.deepEqual(names(c), ['ROOT', 'movies', 'action', 'tv']);
+      assert.equal(c.tree[1].open, true);
+    } finally {
+      c.restore();
+    }
+  });
+
+  test('collapsing ROOT does not stop the root staying scannable via its name', async () => {
+    const c = await mounted();
+    try {
+      // scanDir is the name-click path and must still expand-then-scan, so that
+      // the root directory (whose node starts open) stays reachable.
+      await c.scanDir('');
+      assert.equal(c.scanPath, '');
+      assert.equal(c.tree[0].open, true);
+    } finally {
+      c.restore();
+    }
+  });
+});
