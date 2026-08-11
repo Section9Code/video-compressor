@@ -1242,6 +1242,18 @@ describe('mediaRootFromEnv', () => {
     fs.rmSync(real, { recursive: true, force: true });
     fs.rmSync(path.dirname(link), { recursive: true, force: true });
   });
+
+  test('explains a missing MEDIA_ROOT instead of leaking a raw fs stack', () => {
+    assert.throws(
+      () => mediaRootFromEnv({ MEDIA_ROOT: '/srv/definitely-not-here' }),
+      (err) => {
+        assert.match(err.message, /MEDIA_ROOT is not a readable directory/);
+        assert.match(err.message, /\/srv\/definitely-not-here/);
+        assert.equal(err.cause.code, 'ENOENT');
+        return true;
+      },
+    );
+  });
 });
 
 import { startWorker, withinSchedule } from './worker.js';

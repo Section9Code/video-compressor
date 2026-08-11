@@ -23,8 +23,15 @@ Then open <http://localhost:3000>.
 sudo apt install ffmpeg intel-media-va-driver-non-free vainfo
 sudo usermod -aG render "$USER"     # then log out and back in
 npm install && npm run build
-MEDIA_ROOT=/srv/media DB_PATH=./queue.db npm start
+MEDIA_ROOT=/path/to/your/videos DB_PATH=./queue.db npm start
 ```
+
+`MEDIA_ROOT` must be an existing directory — the app resolves it at startup and
+exits with a message rather than starting against a path that isn't there. Both
+`apt` lines are required: without ffmpeg every file scans as `UNREADABLE`, and
+without the `render` group ffmpeg cannot open `/dev/dri/renderD128`. Docker needs
+neither, since the image installs ffmpeg itself and takes the render group as a
+numeric GID.
 
 ## Configuration
 

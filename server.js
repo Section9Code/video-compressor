@@ -131,11 +131,24 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
 // path it returns is relative to the wrong root: rel() would emit ../mnt/... and
 // swapInPlace's trash path would land outside .trash.
 export function mediaRootFromEnv(env = process.env) {
-  return fs.realpathSync(env.MEDIA_ROOT ?? '/media');
+  const raw = env.MEDIA_ROOT ?? '/media';
+  try {
+    return fs.realpathSync(raw);
+  } catch (err) {
+    // Misconfiguration is the first thing anyone hits; a raw ENOENT stack is a
+    // poor way to say "that directory isn't there".
+    throw new Error(`MEDIA_ROOT is not a readable directory: ${raw} (${err.code})`, { cause: err });
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const mediaRoot = mediaRootFromEnv();
+  let mediaRoot;
+  try {
+    mediaRoot = mediaRootFromEnv();
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
   const db = open(process.env.DB_PATH ?? '/data/queue.db');
   const port = Number(process.env.PORT ?? 3000);
 
