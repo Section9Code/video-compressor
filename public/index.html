@@ -233,6 +233,8 @@
                     <p class="font-mono text-sm" x-text="job.name"></p>
                     <p x-show="job.error" class="mt-1 max-w-xl whitespace-pre-wrap font-mono text-xs text-error"
                        x-text="job.error"></p>
+                    <p x-show="retentionLabel(job)" class="mt-1 font-mono text-xs text-outline"
+                       x-text="retentionLabel(job)"></p>
                   </td>
                   <td class="px-6 py-4 text-right font-mono text-sm text-on-surface-variant"
                       x-text="fmtSize(job.orig_size)"></td>
@@ -331,6 +333,22 @@
         <input type="text" x-model="settings.audioBitrate" placeholder="128k"
                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
         <span class="mt-1 block font-mono text-xs text-outline">Only used when the source audio is not already AAC.</span>
+      </label>
+
+      <label class="block border-t border-outline-variant pt-6">
+        <span class="font-mono text-xs font-bold tracking-[0.1em] text-on-surface-variant">DELETE_ORIGINALS_AFTER</span>
+        <select x-model.number="settings.trashRetentionHours"
+                class="mt-2 w-full border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none">
+          <option value="0">Never — keep originals until I delete them</option>
+          <option value="24">24 hours</option>
+          <option value="48">48 hours</option>
+          <option value="168">7 days</option>
+        </select>
+        <span class="mt-1 block font-mono text-xs text-outline">
+          Originals move to <span class="text-on-surface-variant">.trash</span> and are
+          permanently deleted this long afterwards, giving you time to check the
+          re-encoded file. Only files this app trashed are ever removed.
+        </span>
       </label>
 
       <div class="border-t border-outline-variant pt-6">

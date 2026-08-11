@@ -11,7 +11,7 @@ closely in encode behaviour.
 
 | Question | Decision |
 |---|---|
-| Originals | Replaced, but moved to a trash folder rather than deleted |
+| Originals | Replaced, moved to a trash folder, then purged after a retention window (24h default, "Never" available) |
 | Frontend | Alpine.js + Tailwind v4, styled per `docs/design/` ("Cybernetic Core") |
 | Backend | Node 24 + Express, `node:sqlite`, `node:child_process` |
 | Folder scan | Recursive; shows every video found, pre-selects only those that would shrink |
@@ -106,7 +106,8 @@ One row, defaulted from the script:
   vaapiDevice: "/dev/dri/renderD128",
   scheduleEnabled: false,    // when true, only start encodes inside the window
   scheduleStartHour: 2,      // 0-23, server local time
-  scheduleEndHour: 6         // 0-23, exclusive
+  scheduleEndHour: 6,        // 0-23, exclusive
+  trashRetentionHours: 24    // 0 | 24 | 48 | 168; 0 = keep originals forever
 }
 ```
 
@@ -119,6 +120,41 @@ policy about *when* work may start, not about *how* a file is encoded, so the wo
 reads them live from the settings row on every loop and a change takes effect
 immediately. They are still stored in each job's snapshot — harmlessly — because the
 snapshot is the whole settings object.
+
+## Trash retention
+
+Keeping every original forever means the tool costs disk rather than saving it — the
+saving only lands when `.trash` is emptied. So originals are purged automatically a
+fixed interval after they are trashed, with a window long enough to check the
+re-encoded file first.
+
+One setting, `trashRetentionHours`, defaulting to `24`. Allowed values are `0`, `24`,
+`48` and `168`; `0` means "never" and is the off switch. It is an enum rather than a
+free number for the same reason every other setting is: nothing arbitrary should reach
+code that deletes files.
+
+**The clock comes from the job row, not the filesystem.** `rename` preserves mtime, so
+a file trashed today but authored in 2019 keeps a 2019 mtime — an age-based sweep over
+the directory would delete it instantly and destroy the very window this feature
+exists to provide. The sweep therefore selects `done` rows whose `trash_path` is still
+set and whose `finished_at` is older than the cutoff.
+
+That also bounds what can be deleted: only originals this app trashed itself. Anything
+else under `.trash` — files moved there by hand, or leftovers after the database is
+reset — is never touched.
+
+After a file is unlinked, its row's `trash_path` is set to `NULL`. No new column is
+needed: every `done` row has a `trash_path`, so `NULL` on a `done` row unambiguously
+means the original has been purged, and that is what the UI reads. A file that is
+already gone is not an error — the row is marked purged and the sweep continues. Any
+other failure leaves `trash_path` intact so the next pass retries.
+
+The sweep runs inside the worker loop, before the schedule-window check (purging is
+unrelated to encoding, so a closed window must not stop it) and inside the loop's
+existing error guard. It queries at most once every five minutes rather than on every
+tick.
+
+Empty directories left behind under `.trash` are not pruned.
 
 ## Scheduling
 
@@ -302,7 +338,7 @@ On success, in this order:
 4. record `new_size`, `final_path`, `trash_path`, `finished_at`, status `done`
 
 If step 3 fails, the original is restored from trash and the job is marked `failed`.
-Nothing empties `.trash` — that is a deliberate manual `rm` by the user.
+`.trash` is emptied by the retention sweep below, or by the user's own `rm`.
 
 Note that `final` differs from the source path when the container changes (an `.mkv`
 source with `container: "mp4"` produces a `.mp4`), which is exactly why the original
@@ -370,6 +406,9 @@ Modelled on `docs/design/stitch_cyberdeck_file_explorer/data_processor_desktop`.
   mockup's CPU_USAGE readout is dropped — ffmpeg does not report it and it is not
   worth a second data source.
 - **COMPLETED_ARCHIVE** — a table of `FILENAME / ORIGINAL / COMPRESSED / SAVING`, with
+  each `done` row carrying a line under the filename reading `ORIGINAL DELETED` or
+  `ORIGINAL DELETED IN 18h`, so the retention deadline is visible before it passes
+  rather than discovered afterwards. Nothing is shown when retention is off. Also, with
   `done` rows in toxic green, `skipped` in outline grey, `failed` in error red. Failed
   rows expand to show the ffmpeg stderr tail. A footer totals bytes reclaimed.
 

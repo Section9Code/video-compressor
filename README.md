@@ -2,7 +2,9 @@
 
 A web UI over a server-side ffmpeg queue. Point it at a directory of videos, pick a
 target resolution, and it re-encodes anything larger to HEVC using Intel hardware
-acceleration. Originals are moved to `.trash` inside the media root, not deleted.
+acceleration. Originals are moved to `.trash` inside the media root, deleted on a schedule.
+
+![](/docs/images/example-screen.png)
 
 Replaces `docs/videosCompress.sh`, whose encode settings it inherits.
 
@@ -55,11 +57,30 @@ changing them never rewrites work already in the queue.
    cleanly, the duration matches within 3 seconds, and the result is smaller. If it
    is not smaller, the job is marked `skipped` and the original is untouched.
 4. On success the original moves to `MEDIA_ROOT/.trash/<same relative path>` and the
-   new file takes its place. Nothing ever empties `.trash` — that is a manual
-   `rm -rf` when you are satisfied.
+   new file takes its place.
+5. 24 hours later the original is permanently deleted, unless you change that.
 
 Restarting the container is safe: a job interrupted mid-encode is reset to waiting and
 its temp file removed. The source is never modified until verification passes.
+
+## Trash retention
+
+Keeping every original forever means the tool costs disk rather than saving it — the
+saving only lands when `.trash` is emptied. So originals are deleted automatically
+after a window long enough to check the re-encoded file first.
+
+`DELETE_ORIGINALS_AFTER` under ENCODE_PARAMS: **24 hours** by default, or 48 hours,
+7 days, or **Never** if you would rather empty `.trash` yourself. Each completed row
+in COMPLETED_ARCHIVE shows its deadline (`ORIGINAL DELETED IN 18h`) so it is visible
+before it passes, and reads `ORIGINAL DELETED` afterwards.
+
+Only files this app trashed are ever removed. Anything else under `.trash` — files you
+moved there yourself, or leftovers after the database is reset — is left alone, and
+`Never` disables the sweep entirely.
+
+The clock comes from the job record, not the file's timestamp: `rename` preserves
+mtime, so a file trashed today can carry a years-old mtime, and an age-based sweep
+would delete it immediately rather than after the window.
 
 ## Scheduling
 

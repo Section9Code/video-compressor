@@ -461,6 +461,7 @@ describe('settings', () => {
       scheduleEnabled: false,
       scheduleStartHour: 2,
       scheduleEndHour: 6,
+      trashRetentionHours: 24,
     });
   });
 
@@ -1436,5 +1437,181 @@ describe('directory tree expand/collapse', () => {
     } finally {
       c.restore();
     }
+  });
+});
+
+import { RETENTIONS, expiredTrash } from './db.js';
+import { sweepTrash } from './worker.js';
+
+describe('trash retention settings', () => {
+  test('defaults to 24 hours', () => {
+    assert.equal(DEFAULT_SETTINGS.trashRetentionHours, 24);
+  });
+
+  test('accepts every offered window, including never', () => {
+    assert.deepEqual(RETENTIONS, [0, 24, 48, 168]);
+    for (const trashRetentionHours of RETENTIONS) {
+      assert.equal(validateSettings({ trashRetentionHours }).trashRetentionHours, trashRetentionHours);
+    }
+  });
+
+  for (const bad of [{ trashRetentionHours: 1 }, { trashRetentionHours: '24' }, { trashRetentionHours: -24 }]) {
+    test(`rejects ${JSON.stringify(bad)}`, () => {
+      assert.throws(() => validateSettings(bad), (err) => err.status === 400);
+    });
+  }
+});
+
+describe('expiredTrash', () => {
+  const HOUR = 3600_000;
+  const now = 1_700_000_000_000;
+
+  const seed = (db, rows) => {
+    addJobs(db, rows.map((r) => sampleFile(r.path)), SAMPLE_SETTINGS);
+    for (const [i, r] of rows.entries()) {
+      updateJob(db, i + 1, {
+        status: r.status, finished_at: r.finished_at, trash_path: r.trash_path,
+      });
+    }
+  };
+
+  test('returns done rows whose trash is older than the window', () => {
+    const db = open(':memory:');
+    seed(db, [
+      { path: '/m/old.mkv', status: 'done', finished_at: now - 25 * HOUR, trash_path: '/m/.trash/old.mkv' },
+      { path: '/m/fresh.mkv', status: 'done', finished_at: now - 23 * HOUR, trash_path: '/m/.trash/fresh.mkv' },
+    ]);
+
+    const due = expiredTrash(db, 24, now);
+    assert.deepEqual(due.map((r) => r.trash_path), ['/m/.trash/old.mkv']);
+  });
+
+  test('is empty when retention is off, however old the rows are', () => {
+    const db = open(':memory:');
+    seed(db, [{ path: '/m/a.mkv', status: 'done', finished_at: 0, trash_path: '/m/.trash/a.mkv' }]);
+    assert.deepEqual(expiredTrash(db, 0, now), []);
+  });
+
+  test('ignores rows already purged, and every non-done status', () => {
+    const db = open(':memory:');
+    seed(db, [
+      { path: '/m/purged.mkv', status: 'done', finished_at: 0, trash_path: null },
+      { path: '/m/failed.mkv', status: 'failed', finished_at: 0, trash_path: '/m/.trash/failed.mkv' },
+      { path: '/m/skipped.mkv', status: 'skipped', finished_at: 0, trash_path: '/m/.trash/skipped.mkv' },
+      { path: '/m/waiting.mkv', status: 'waiting', finished_at: 0, trash_path: '/m/.trash/waiting.mkv' },
+    ]);
+    assert.deepEqual(expiredTrash(db, 24, now), []);
+  });
+
+  test('the boundary is exclusive at exactly the window', () => {
+    const db = open(':memory:');
+    seed(db, [{ path: '/m/a.mkv', status: 'done', finished_at: now - 24 * HOUR, trash_path: '/m/.trash/a.mkv' }]);
+    assert.equal(expiredTrash(db, 24, now).length, 0, 'exactly 24h old is not yet expired');
+    assert.equal(expiredTrash(db, 24, now + 1).length, 1, 'a millisecond later it is');
+  });
+});
+
+describe('sweepTrash', () => {
+  const HOUR = 3600_000;
+  const now = 1_700_000_000_000;
+
+  const setup = (retentionHours = 24) => {
+    const root = fs.realpathSync(tmpdir('vc-sweep-'));
+    fs.mkdirSync(path.join(root, '.trash', 'movies'), { recursive: true });
+    const trashed = path.join(root, '.trash', 'movies', 'old.mkv');
+    fs.writeFileSync(trashed, 'original');
+
+    const db = open(':memory:');
+    putSettings(db, { ...SAMPLE_SETTINGS, trashRetentionHours: retentionHours });
+    addJobs(db, [sampleFile(path.join(root, 'movies', 'old.mkv'))], SAMPLE_SETTINGS);
+    updateJob(db, 1, { status: 'done', finished_at: now - 25 * HOUR, trash_path: trashed });
+    return { db, root, trashed };
+  };
+
+  test('deletes an expired original and marks the row purged', async () => {
+    const { db, root, trashed } = setup();
+    const purged = await sweepTrash(db, { now: () => now });
+
+    assert.equal(purged, 1);
+    assert.equal(fs.existsSync(trashed), false, 'the trashed original must be gone');
+    assert.equal(getJob(db, 1).trash_path, null);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('does nothing when retention is off', async () => {
+    const { db, root, trashed } = setup(0);
+    assert.equal(await sweepTrash(db, { now: () => now }), 0);
+    assert.equal(fs.existsSync(trashed), true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('treats an already-missing file as purged rather than an error', async () => {
+    const { db, root, trashed } = setup();
+    fs.unlinkSync(trashed);
+
+    assert.equal(await sweepTrash(db, { now: () => now }), 1);
+    assert.equal(getJob(db, 1).trash_path, null, 'the row must not be retried forever');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('leaves the row intact when the unlink genuinely fails, so it retries', async () => {
+    const { db, root, trashed } = setup();
+    const failing = { unlink: async () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); } };
+
+    assert.equal(await sweepTrash(db, { now: () => now, fsp: failing }), 0);
+    assert.equal(getJob(db, 1).trash_path, trashed, 'still set, so the next pass retries');
+    assert.equal(fs.existsSync(trashed), true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('retentionLabel', () => {
+  const HOUR = 3600_000;
+  const done = (over) => ({
+    status: 'done', trash_path: '.trash/a.mkv', finished_at: Date.now(), ...over,
+  });
+
+  const withRetention = (hours) => {
+    const c = loadComponent();
+    c.settings = { trashRetentionHours: hours };
+    return c;
+  };
+
+  test('says nothing for jobs that are not done', () => {
+    const c = withRetention(24);
+    try {
+      for (const status of ['waiting', 'processing', 'failed', 'skipped']) {
+        assert.equal(c.retentionLabel(done({ status })), '');
+      }
+    } finally { c.restore(); }
+  });
+
+  test('reports a purged original even when retention is later switched off', () => {
+    const c = withRetention(0);
+    try {
+      assert.equal(c.retentionLabel(done({ trash_path: null })), 'ORIGINAL DELETED');
+    } finally { c.restore(); }
+  });
+
+  test('says nothing while retention is off and the original is still there', () => {
+    const c = withRetention(0);
+    try {
+      assert.equal(c.retentionLabel(done()), '');
+    } finally { c.restore(); }
+  });
+
+  test('counts down in hours, then minutes', () => {
+    const c = withRetention(24);
+    try {
+      assert.equal(c.retentionLabel(done({ finished_at: Date.now() - 6 * HOUR })), 'ORIGINAL DELETED IN 18h');
+      assert.match(c.retentionLabel(done({ finished_at: Date.now() - 23.5 * HOUR })), /IN \d+m$/);
+    } finally { c.restore(); }
+  });
+
+  test('never shows a negative or zero countdown', () => {
+    const c = withRetention(24);
+    try {
+      assert.equal(c.retentionLabel(done({ finished_at: Date.now() - 30 * HOUR })), 'ORIGINAL DELETED SHORTLY');
+    } finally { c.restore(); }
   });
 });

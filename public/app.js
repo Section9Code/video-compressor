@@ -199,6 +199,22 @@ function app() {
         .reduce((n, j) => n + (j.orig_size - j.new_size), 0);
     },
 
+    // Mirrors expiredTrash's clock: finished_at plus the retention window. Shown so
+    // the deadline is visible before it passes rather than discovered afterwards.
+    retentionLabel(job) {
+      if (job.status !== 'done') return '';
+      if (!job.trash_path) return 'ORIGINAL DELETED';
+      const hours = this.settings.trashRetentionHours;
+      if (!hours) return '';
+
+      const left = job.finished_at + hours * 3600_000 - Date.now();
+      if (left <= 0) return 'ORIGINAL DELETED SHORTLY';
+      const h = Math.floor(left / 3600_000);
+      return h >= 1
+        ? `ORIGINAL DELETED IN ${h}h`
+        : `ORIGINAL DELETED IN ${Math.max(1, Math.round(left / 60_000))}m`;
+    },
+
     savingPct(job) {
       if (!job.orig_size || !job.new_size) return 0;
       return Math.round((1 - job.new_size / job.orig_size) * 100);

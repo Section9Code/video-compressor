@@ -2,7 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-import { getSettings, nextWaiting, updateJob } from './db.js';
+import { expiredTrash, getSettings, nextWaiting, updateJob } from './db.js';
 import { buildEncodeArgs, createProgressParser, percentFrom, swapInPlace, verifyEncode } from './encode.js';
 import { probeAudioCodec as realProbeAudio, probeVideo as realProbeVideo } from './media.js';
 
@@ -158,13 +158,42 @@ export function withinSchedule(date, settings) {
     : hour >= start || hour < end;
 }
 
+const SWEEP_INTERVAL_MS = 5 * 60_000;
+
+// Purge originals whose retention window has passed. Returns how many were purged.
+// A file that is already gone is the goal state, not a failure — mark the row and
+// move on. Any other error leaves trash_path set so the next pass retries.
+export async function sweepTrash(db, { now = Date.now, fsp: fs = fsp } = {}) {
+  const due = expiredTrash(db, getSettings(db).trashRetentionHours, now());
+  let purged = 0;
+
+  for (const job of due) {
+    try {
+      await fs.unlink(job.trash_path);
+    } catch (err) {
+      if (err.code !== 'ENOENT') continue;
+    }
+    updateJob(db, job.id, { trash_path: null });
+    purged += 1;
+  }
+  return purged;
+}
+
 export function startWorker(db, deps) {
   const { idleMs = 2000, now = Date.now } = deps;
   let stopped = false;
+  let lastSweep = 0;
 
   (async () => {
     while (!stopped) {
       try {
+        // Before the schedule check: purging is unrelated to encoding, so a closed
+        // window must not stop it. Throttled, since the loop ticks every 2s.
+        if (now() - lastSweep >= SWEEP_INTERVAL_MS) {
+          lastSweep = now();
+          await sweepTrash(db, { now });
+        }
+
         // Read live rather than from the job snapshot: this is policy about when work
         // may start, so a schedule change should take effect immediately.
         if (!withinSchedule(new Date(now()), getSettings(db))) {

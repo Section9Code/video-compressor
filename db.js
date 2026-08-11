@@ -141,11 +141,15 @@ export const DEFAULT_SETTINGS = {
   scheduleEnabled: false,
   scheduleStartHour: 2,
   scheduleEndHour: 6,
+  trashRetentionHours: 24,
 };
 
 export const TARGETS = [480, 540, 720, 1080, 1440];
 export const ENCODERS = ['vaapi', 'qsv', 'software'];
 export const CONTAINERS = ['mp4', 'mkv'];
+// An enum, not a free number: nothing arbitrary should reach code that deletes files.
+// 0 means "keep originals forever" and is the off switch.
+export const RETENTIONS = [0, 24, 48, 168];
 
 // This is a trust boundary: every value here ends up in an ffmpeg argument list.
 export function validateSettings(input) {
@@ -182,6 +186,9 @@ export function validateSettings(input) {
   if (s.scheduleEnabled && s.scheduleStartHour === s.scheduleEndHour) {
     throw badRequest('the schedule window start and end hours must differ');
   }
+  if (!RETENTIONS.includes(s.trashRetentionHours)) {
+    throw badRequest(`trashRetentionHours must be one of ${RETENTIONS.join(', ')}`);
+  }
 
   return {
     targetShortSide: s.targetShortSide,
@@ -193,6 +200,7 @@ export function validateSettings(input) {
     scheduleEnabled: s.scheduleEnabled,
     scheduleStartHour: s.scheduleStartHour,
     scheduleEndHour: s.scheduleEndHour,
+    trashRetentionHours: s.trashRetentionHours,
   };
 }
 
@@ -209,4 +217,19 @@ export function putSettings(db, input) {
     ON CONFLICT (id) DO UPDATE SET json = excluded.json
   `).run(JSON.stringify(settings));
   return settings;
+}
+
+const HOUR_MS = 3600_000;
+
+// The clock is the job row, never the filesystem: rename preserves mtime, so a file
+// trashed today but authored years ago keeps its old mtime and an age-based sweep
+// would delete it instantly. This also bounds the sweep to originals this app
+// trashed itself — anything else under .trash is never touched.
+export function expiredTrash(db, retentionHours, now = Date.now()) {
+  if (!retentionHours) return [];
+  return db.prepare(`
+    SELECT * FROM jobs
+     WHERE status = 'done' AND trash_path IS NOT NULL AND finished_at < ?
+     ORDER BY id
+  `).all(now - retentionHours * HOUR_MS);
 }
