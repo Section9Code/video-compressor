@@ -59,6 +59,7 @@ function runFfmpeg({ spawn, args, durationSeconds, onProgress }) {
 export async function runJob(db, job, deps) {
   const {
     mediaRoot,
+    trashRoot = path.join(mediaRoot, '.trash'),
     spawn = nodeSpawn,
     probeVideo = realProbeVideo,
     probeAudioCodec = realProbeAudio,
@@ -130,7 +131,7 @@ export async function runJob(db, job, deps) {
       return;
     }
 
-    const trashPath = await swapInPlace({ src: job.path, tmp, final, mediaRoot });
+    const trashPath = await swapInPlace({ src: job.path, tmp, final, mediaRoot, trashRoot });
     updateJob(db, job.id, {
       status: 'done',
       progress: 100,

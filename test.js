@@ -732,7 +732,7 @@ describe('swapInPlace', () => {
     fs.writeFileSync(src, 'original');
     fs.writeFileSync(tmp, 'new');
 
-    const trashPath = await swapInPlace({ src, tmp, final, mediaRoot: root });
+    const trashPath = await swapInPlace({ src, tmp, final, mediaRoot: root, trashRoot: path.join(root, '.trash') });
 
     assert.equal(fs.readFileSync(final, 'utf8'), 'new');
     assert.equal(fs.existsSync(src), false);
@@ -754,7 +754,7 @@ describe('swapInPlace', () => {
       src,
       tmp: path.join(root, 'movies', '.a.tmp.mp4'),
       final: path.join(root, 'movies', 'a.mp4'),
-      mediaRoot: root,
+      mediaRoot: root, trashRoot: path.join(root, '.trash'),
     });
 
     assert.equal(trashPath, path.join(root, '.trash', 'movies', 'a.mkv.1'));
@@ -772,7 +772,7 @@ describe('swapInPlace', () => {
     fs.writeFileSync(tmp, 'new');
 
     await assert.rejects(
-      swapInPlace({ src, tmp, final, mediaRoot: root }),
+      swapInPlace({ src, tmp, final, mediaRoot: root, trashRoot: path.join(root, '.trash') }),
       (err) => {
         assert.match(err.message, /refusing to overwrite/);
         assert.ok(err.message.includes('movies/clip.mp4'), 'names the collision');
@@ -793,7 +793,7 @@ describe('swapInPlace', () => {
     fs.writeFileSync(src, 'original');
     fs.writeFileSync(tmp, 'new');
 
-    const trashPath = await swapInPlace({ src, tmp, final: src, mediaRoot: root });
+    const trashPath = await swapInPlace({ src, tmp, final: src, mediaRoot: root, trashRoot: path.join(root, '.trash') });
 
     assert.equal(fs.readFileSync(src, 'utf8'), 'new');
     assert.equal(fs.readFileSync(trashPath, 'utf8'), 'original');
@@ -811,7 +811,7 @@ describe('swapInPlace', () => {
       src,
       tmp,
       final: path.join(root, 'movies', 'no-such-dir', 'a.mp4'),
-      mediaRoot: root,
+      mediaRoot: root, trashRoot: path.join(root, '.trash'),
     }));
 
     assert.equal(fs.readFileSync(src, 'utf8'), 'original', 'original must be back in place');
@@ -840,7 +840,7 @@ describe('swapInPlace', () => {
           src,
           tmp,
           final: path.join(root, 'movies', 'no-such-dir', 'a.mp4'),
-          mediaRoot: root,
+          mediaRoot: root, trashRoot: path.join(root, '.trash'),
         }),
         (err) => {
           assert.match(err.message, /restore blocked/);
@@ -897,7 +897,7 @@ describe('runJob', () => {
   };
 
   const deps = (over = {}) => ({
-    mediaRoot: root,
+    mediaRoot: root, trashRoot: path.join(root, '.trash'),
     probeVideo: async () => ({ codec: 'hevc', width: 1280, height: 720, duration: 60 }),
     probeAudioCodec: async () => 'ac3',
     now: () => 1700000000000,
@@ -1064,7 +1064,7 @@ describe('http api', () => {
     db = open(':memory:');
     const app = createApp({
       db,
-      mediaRoot: root,
+      mediaRoot: root, trashRoot: path.join(root, '.trash'),
       scan: async () => files(),
       probe: async () => ({ codec: 'h264', width: 1920, height: 1080, duration: 60 }),
     });
@@ -1613,5 +1613,88 @@ describe('retentionLabel', () => {
     try {
       assert.equal(c.retentionLabel(done({ finished_at: Date.now() - 30 * HOUR })), 'ORIGINAL DELETED SHORTLY');
     } finally { c.restore(); }
+  });
+});
+
+import { trashRootFromEnv } from './server.js';
+
+describe('trashRootFromEnv', () => {
+  test('defaults to .trash inside the media root, creating it', () => {
+    const media = fs.realpathSync(tmpdir('vc-troot-'));
+    const trash = trashRootFromEnv({ MEDIA_ROOT: media }, media);
+
+    assert.equal(trash, path.join(media, '.trash'));
+    assert.equal(fs.existsSync(trash), true, 'must be created, not merely computed');
+    fs.rmSync(media, { recursive: true, force: true });
+  });
+
+  test('honours an explicit TRASH_ROOT outside the media root', () => {
+    const media = fs.realpathSync(tmpdir('vc-tm-'));
+    const elsewhere = path.join(fs.realpathSync(tmpdir('vc-te-')), 'processed');
+
+    const trash = trashRootFromEnv({ TRASH_ROOT: elsewhere }, media);
+    assert.equal(trash, fs.realpathSync(elsewhere));
+    assert.equal(fs.existsSync(trash), true);
+
+    fs.rmSync(media, { recursive: true, force: true });
+    fs.rmSync(path.dirname(elsewhere), { recursive: true, force: true });
+  });
+
+  test('fails at startup with a clear message when it cannot be written', () => {
+    const media = fs.realpathSync(tmpdir('vc-tro-'));
+    const locked = path.join(media, 'locked');
+    fs.mkdirSync(locked);
+    fs.chmodSync(locked, 0o500);
+
+    try {
+      assert.throws(
+        () => trashRootFromEnv({ TRASH_ROOT: path.join(locked, 'trash') }, media),
+        (err) => {
+          assert.match(err.message, /TRASH_ROOT is not writable/);
+          assert.match(err.message, /locked/);
+          return true;
+        },
+      );
+    } finally {
+      fs.chmodSync(locked, 0o700);
+      fs.rmSync(media, { recursive: true, force: true });
+    }
+  });
+
+  test('leaves no probe file behind', () => {
+    const media = fs.realpathSync(tmpdir('vc-trp-'));
+    const trash = trashRootFromEnv({ MEDIA_ROOT: media }, media);
+    assert.deepEqual(fs.readdirSync(trash), []);
+    fs.rmSync(media, { recursive: true, force: true });
+  });
+});
+
+describe('scanTree trash exclusion', () => {
+  const fakeProbe = async () => ({ codec: 'h264', width: 1920, height: 1080, duration: 60 });
+
+  test('skips the configured trash root even when it is not named .trash', async () => {
+    const root = fs.realpathSync(tmpdir('vc-tx-'));
+    fs.mkdirSync(path.join(root, 'processed', 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'keep.mkv'), 'a');
+    fs.writeFileSync(path.join(root, 'processed', 'old.mkv'), 'a');
+    fs.writeFileSync(path.join(root, 'processed', 'nested', 'older.mkv'), 'a');
+
+    const found = await scanTree(root, { probe: fakeProbe, trashRoot: path.join(root, 'processed') });
+    assert.deepEqual(found.map((f) => path.basename(f.path)), ['keep.mkv'],
+      'trashed originals must never be rescanned, or they get re-encoded in a loop');
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('still skips dot-directories, which the tree hides anyway', async () => {
+    const root = fs.realpathSync(tmpdir('vc-td-'));
+    fs.mkdirSync(path.join(root, '.hidden'));
+    fs.writeFileSync(path.join(root, '.hidden', 'a.mkv'), 'a');
+    fs.writeFileSync(path.join(root, 'b.mkv'), 'a');
+
+    const found = await scanTree(root, { probe: fakeProbe });
+    assert.deepEqual(found.map((f) => path.basename(f.path)), ['b.mkv']);
+
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });

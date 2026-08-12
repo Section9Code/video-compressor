@@ -13,7 +13,7 @@ import { badRequest, listDirs, probeVideo, resolveSafe, scanTree, wouldReduce } 
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }) {
+export function createApp({ db, mediaRoot, trashRoot = path.join(mediaRoot, '.trash'), scan = scanTree, probe = probeVideo }) {
   const app = express();
   // The spec anticipates trees of a few thousand files, and POST /api/jobs sends one
   // relative path per selected file — well past express's 100kb default.
@@ -38,7 +38,7 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
     // at a lower target is a legitimate thing to want. skipped/failed still block,
     // since those rows are the SKIP_LIST and carry their own RETRY action.
     const queued = new Set(listJobs(db).filter((j) => j.status !== 'done').map((j) => j.path));
-    const found = await scan(abs, { probe });
+    const found = await scan(abs, { probe, trashRoot });
 
     res.json({
       path: rel(abs),
@@ -84,7 +84,7 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
         path: rel(job.path),
         name: path.basename(job.path),
         final_path: rel(job.final_path),
-        trash_path: rel(job.trash_path),
+        trash_path: job.trash_path && path.relative(trashRoot, job.trash_path),
         settings: JSON.parse(job.settings_json),
       })),
       // Computed here, not in the browser: the server's clock is the one that
@@ -127,9 +127,25 @@ export function createApp({ db, mediaRoot, scan = scanTree, probe = probeVideo }
   return app;
 }
 
+// Some media roots cannot be written to at their top level, and the failure would
+// otherwise surface at swap time — after an encode has already burned the CPU. Prove
+// it is writable at startup instead.
+export function trashRootFromEnv(env, mediaRoot) {
+  const raw = env.TRASH_ROOT || path.join(mediaRoot, '.trash');
+  const probe = path.join(raw, `.write-probe-${process.pid}`);
+  try {
+    fs.mkdirSync(raw, { recursive: true });
+    fs.writeFileSync(probe, '');
+    fs.unlinkSync(probe);
+  } catch (err) {
+    throw new Error(`TRASH_ROOT is not writable: ${raw} (${err.code})`, { cause: err });
+  }
+  return fs.realpathSync(raw);
+}
+
 // resolveSafe realpaths internally, so mediaRoot has to be a realpath too or every
-// path it returns is relative to the wrong root: rel() would emit ../mnt/... and
-// swapInPlace's trash path would land outside .trash.
+// path it returns is relative to the wrong root: rel() would emit ../mnt/... and the
+// trash path would land outside the trash root.
 export function mediaRootFromEnv(env = process.env) {
   const raw = env.MEDIA_ROOT ?? '/media';
   try {
@@ -143,8 +159,10 @@ export function mediaRootFromEnv(env = process.env) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let mediaRoot;
+  let trashRoot;
   try {
     mediaRoot = mediaRootFromEnv();
+    trashRoot = trashRootFromEnv(process.env, mediaRoot);
   } catch (err) {
     console.error(err.message);
     process.exit(1);
@@ -158,8 +176,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await cleanupTempFiles(recovered);
   }
 
-  startWorker(db, { mediaRoot });
-  createApp({ db, mediaRoot }).listen(port, () => {
-    console.log(`video-compressor on :${port}, media root ${mediaRoot}`);
+  startWorker(db, { mediaRoot, trashRoot });
+  createApp({ db, mediaRoot, trashRoot }).listen(port, () => {
+    console.log(`video-compressor on :${port}, media root ${mediaRoot}, trash ${trashRoot}`);
   });
 }

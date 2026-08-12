@@ -29,9 +29,9 @@ COPY public ./public
 COPY --from=assets /app/public/app.css /app/public/alpine.js ./public/
 
 # The named volume inherits this ownership, so the non-root user can write the db.
-RUN mkdir -p /data /media && chown -R node:node /data /media
+RUN mkdir -p /data /media /trash && chown -R node:node /data /media /trash
 USER node
 
-ENV MEDIA_ROOT=/media DB_PATH=/data/queue.db PORT=3000
+ENV MEDIA_ROOT=/media TRASH_ROOT=/trash DB_PATH=/data/queue.db PORT=3000
 EXPOSE 3000
 CMD ["node", "server.js"]

@@ -42,6 +42,7 @@ numeric GID.
 | `MEDIA_ROOT` | `/media` | The only directory the app can see or touch |
 | `DB_PATH` | `/data/queue.db` | SQLite queue file |
 | `PORT` | `3000` | HTTP port |
+| `TRASH_ROOT` | `<MEDIA_ROOT>/.trash` | Where replaced originals are kept until purged |
 | `TZ` | `UTC` | Timezone the encode schedule window is evaluated in |
 
 Encode settings — target resolution, quality, encoder, container, audio bitrate — live
@@ -73,6 +74,13 @@ after a window long enough to check the re-encoded file first.
 7 days, or **Never** if you would rather empty `.trash` yourself. Each completed row
 in COMPLETED_ARCHIVE shows its deadline (`ORIGINAL DELETED IN 18h`) so it is visible
 before it passes, and reads `ORIGINAL DELETED` afterwards.
+
+Originals go to `TRASH_ROOT`, which defaults to `.trash` inside the media root. Set it
+if your media root is not writable at its top level, or if you want the originals on
+different storage — mount it as `TRASH_DIR` in `.env`. The directory must be writable
+by uid 1000; the server checks at startup and refuses to start with a clear message
+rather than failing later, after an encode has already run. A trash root on a different
+filesystem works, but each swap becomes a full copy rather than a rename.
 
 Only files this app trashed are ever removed. Anything else under `.trash` — files you
 moved there yourself, or leftovers after the database is reset — is left alone, and

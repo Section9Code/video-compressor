@@ -9,8 +9,10 @@ services:
       - "${RENDER_GID}"
     environment:
       TZ: "${TZ:-UTC}"
+      TRASH_ROOT: /trash
     volumes:
       - "${MEDIA_DIR}:/media"
+      - "${TRASH_DIR}:/trash"
       - queue-data:/data
     restart: unless-stopped
 

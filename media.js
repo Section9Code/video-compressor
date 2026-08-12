@@ -53,7 +53,6 @@ export const VIDEO_EXTENSIONS = [
   'mkv', 'mp4', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', 'ts', 'm2ts', 'webm',
 ];
 
-const TRASH_DIR = '.trash';
 
 function isVideo(name) {
   const ext = path.extname(name).slice(1).toLowerCase();
@@ -101,7 +100,7 @@ export async function listDirs(absDir) {
     .sort();
 }
 
-async function walk(dir, out) {
+async function walk(dir, out, trashRoot) {
   let entries;
   try {
     entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -113,8 +112,12 @@ async function walk(dir, out) {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === TRASH_DIR) continue;
-      await walk(full, out);
+      // By path, not by name: with the trash location configurable, a trash root
+      // inside MEDIA_ROOT under any other name would have its contents rescanned and
+      // re-queued, quietly re-encoding files already processed. Dot-directories are
+      // skipped too, so the walk agrees with listDirs, which already hides them.
+      if (full === trashRoot || entry.name.startsWith('.')) continue;
+      await walk(full, out, trashRoot);
     } else if (entry.isFile() && !entry.name.startsWith('.') && isVideo(entry.name)) {
       out.push(full);
     }
@@ -136,9 +139,9 @@ async function pool(items, limit, fn) {
   return out;
 }
 
-export async function scanTree(absDir, { probe = probeVideo, concurrency = 4 } = {}) {
+export async function scanTree(absDir, { probe = probeVideo, concurrency = 4, trashRoot = null } = {}) {
   const files = [];
-  await walk(absDir, files);
+  await walk(absDir, files, trashRoot);
   files.sort();
 
   const scanned = await pool(files, concurrency, async (file) => {

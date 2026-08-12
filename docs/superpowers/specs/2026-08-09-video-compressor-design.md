@@ -156,6 +156,36 @@ tick.
 
 Empty directories left behind under `.trash` are not pruned.
 
+## Trash location
+
+Replaced originals go to `TRASH_ROOT`, which defaults to `<MEDIA_ROOT>/.trash` — so a
+deployment that sets nothing behaves exactly as before. It is an env var rather than a
+user setting because it describes where the disk is, not what the user wants.
+
+Some media roots cannot be written to at their top level, so `mkdir '<MEDIA_ROOT>/.trash'`
+fails with `EACCES` — and it fails at swap time, *after* an encode has already burned
+the CPU. The server therefore resolves `TRASH_ROOT` at startup, creates it if missing,
+and proves it is writable by writing and removing a probe file. A failure exits with a
+clear message rather than surfacing later as a failed job.
+
+**The scanner excludes the trash root by path, not by name.** Skipping directories
+called `.trash` was sufficient while the location was fixed; with it configurable, a
+trash root inside `MEDIA_ROOT` under any other name would have its contents rescanned
+and re-queued, quietly re-encoding files already processed. The walk also skips
+dot-directories generally, which makes it agree with the directory tree — `listDirs`
+already hides them, so they were unreachable in the UI regardless.
+
+A `TRASH_ROOT` on a different filesystem from the media is supported: `moveFile`
+already falls back to copy-then-unlink on `EXDEV`. It is slower than a rename, and
+both copies briefly exist.
+
+`trash_path` in API responses is relative to `TRASH_ROOT`, so a trash location outside
+the media root does not produce `../../..` paths in HTTP responses. The retention sweep
+is unaffected — it records and unlinks absolute paths server-side.
+
+Changing `TRASH_ROOT` does not move already-trashed files. Their absolute paths are
+recorded per job row, so the retention sweep still finds and purges them where they are.
+
 ## Scheduling
 
 When `scheduleEnabled` is false the worker drains the queue continuously, which is
@@ -331,7 +361,7 @@ Failing 4 → `skipped`, temp deleted, original untouched.
 
 On success, in this order:
 
-1. `trash = MEDIA_ROOT/.trash/<path relative to MEDIA_ROOT>`; create its parent
+1. `trash = TRASH_ROOT/<path relative to MEDIA_ROOT>`; create its parent
 2. move the original to `trash` — `rename`, falling back to copy-then-unlink on
    `EXDEV` if `.trash` somehow lands on a different mount
 3. `rename(temp, final)`
@@ -433,6 +463,7 @@ in the final layer.
 | `MEDIA_ROOT` | `/media` | The only directory the app can see |
 | `DB_PATH` | `/data/queue.db` | SQLite file |
 | `PORT` | `3000` | HTTP port |
+| `TRASH_ROOT` | `<MEDIA_ROOT>/.trash` | Where replaced originals are kept until purged |
 | `TZ` | unset (UTC) | Timezone the encode schedule window is evaluated in |
 
 Run:

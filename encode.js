@@ -129,7 +129,7 @@ async function uniquePath(target) {
 
 // The original goes to trash before the new file lands, because a container change
 // means the two have different names and would otherwise both exist.
-export async function swapInPlace({ src, tmp, final, mediaRoot }) {
+export async function swapInPlace({ src, tmp, final, mediaRoot, trashRoot }) {
   // rename() overwrites its destination silently. When the container changes,
   // `final` is a different name that may already hold a video of its own —
   // clip.mov encoding to clip.mp4 in a directory that already has clip.mp4.
@@ -142,7 +142,7 @@ export async function swapInPlace({ src, tmp, final, mediaRoot }) {
     );
   }
 
-  const trashTarget = path.join(mediaRoot, '.trash', path.relative(mediaRoot, src));
+  const trashTarget = path.join(trashRoot, path.relative(mediaRoot, src));
   await fsp.mkdir(path.dirname(trashTarget), { recursive: true });
   const trashPath = await uniquePath(trashTarget);
 
